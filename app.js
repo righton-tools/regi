@@ -2,7 +2,7 @@
 window.startPOS=function(CFG,SHOP_ID,DB,ME){
 'use strict';
 const ROOT=document.getElementById('root');
-ROOT.innerHTML='<div id="app">  <header class="bar">    <div class="logo"><b></b><span></span></div>    <nav class="tabs" id="tabs"></nav>    <div class="meta"><span class="pill" id="sync"><i></i><span>接続中</span></span><span class="clock num" id="clock"></span></div>  </header>  <main id="main"></main></div><div id="modal" hidden></div><div id="toasts"></div>';
+ROOT.innerHTML='<div id="app">  <header class="bar">    <div class="logo"><b></b><span></span></div>    <nav class="tabs" id="tabs"></nav>    <div class="meta"><span id="barhelp"></span><span class="pill" id="sync"><i></i><span>接続中</span></span><span class="clock num" id="clock"></span></div>  </header>  <main id="main"></main></div><div id="modal" hidden></div><div id="toasts"></div>';
 document.title=CFG.name+' POSレジ';
 if(CFG.logoImg){const L=document.querySelector('.logo');L.classList.add('haslogo');L.innerHTML='<img alt=""><span></span>';L.querySelector('img').src=CFG.logoImg;L.querySelector('img').alt=CFG.name}
 else document.querySelector('.logo b').textContent=CFG.logo||CFG.name;
@@ -18,6 +18,7 @@ try{localStorage.setItem('pos.brand',JSON.stringify({img:CFG.logoBig||CFG.logoIm
   if(CFG.logoImg){const im=new Image();im.onload=()=>{const pad=180*(ic.pad==null?.12:ic.pad),k=Math.min((180-pad*2)/im.width,(180-pad*2)/im.height),w=im.width*k,h=im.height*k;x.drawImage(im,(180-w)/2,(180-h)/2,w,h);put()};im.src=CFG.logoImg;return}
   const t=ic.text||CFG.logo||CFG.name;let fs=72;x.fillStyle=ic.fg||'#ffffff';x.textAlign='center';x.textBaseline='middle';do{x.font='900 '+fs+'px '+(ic.font==='serif'?'"Yu Mincho","Hiragino Mincho ProN",serif':'"Yu Gothic","Hiragino Sans",sans-serif');fs-=4}while(x.measureText(t).width>120&&fs>12);x.fillText(t,90,94);put()}catch(e){}})();
 const PFX='pos.'+SHOP_ID+'.';
+const HP=k=>window.POSHelp?window.POSHelp.btn(k):'';
 const PA=window.POSAuth,BOSS=ME.role==='manager'||ME.role==='master';
 /* ---------- 小道具 ---------- */
 const $=(s,r=document)=>r.querySelector(s);
@@ -133,6 +134,7 @@ function renderBar(){
   const s=$('#sync');s.className='pill '+(live?'live':Store.mode==='wait'?'':'local');
   s.lastElementChild.textContent=live?'連動中':Store.mode==='fb'?'電波待ち':Store.failed?'未接続':Store.mode==='local'?'この端末のみ':'接続中';
   $('#clock').textContent=hm(Date.now());
+  const hb=$('#barhelp');if(hb)hb.innerHTML=HP(S.tab);
 }
 
 /* ---------- 画面：注文 ---------- */
@@ -183,30 +185,42 @@ function renderCheck(){
 
 /* ---------- オプション選択 ---------- */
 let X=null;
+const cloneU=u=>({sel:Object.fromEntries(Object.entries(u.sel).map(([g,v])=>[g,[...v]])),note:u.note});
 function openItem(mid,k){
   const m=item(mid);if(!m)return;
   const ln=k?draft().find(l=>l.k===k):null;
-  X={mid,k:k||null,sel:{},note:ln?ln.note:'',qty:ln?ln.qty:1};
-  m.mods.forEach(g=>X.sel[g]=ln?ln.mods.filter(x=>x.g===g).map(x=>x.n):[]);
+  const u={sel:{},note:ln?ln.note:''};
+  m.mods.forEach(g=>u.sel[g]=ln?ln.mods.filter(x=>x.g===g).map(x=>x.n):[]);
+  X={mid,k:k||null,qty:ln?ln.qty:1,same:true,cur:0,units:[u],
+    get sel(){return this.units[this.cur].sel},
+    get note(){return this.units[this.cur].note},set note(v){this.units[this.cur].note=v}};
   renderItemSheet();
 }
+const unitMods=(m,u)=>{const r=[];m.mods.forEach(g=>GROUPS[g].opts.forEach(([n,p])=>{if((u.sel[g]||[]).includes(n))r.push({g,n,p})}));return r};
+const unitOk=(m,u)=>m.mods.every(g=>GROUPS[g].type!=='req'||(u.sel[g]||[]).length);
 function renderItemSheet(){
-  const m=item(X.mid);
-  const mods=[];m.mods.forEach(g=>GROUPS[g].opts.forEach(([n,p])=>{if(X.sel[g].includes(n))mods.push({g,n,p})}));
-  const ok=m.mods.every(g=>GROUPS[g].type!=='req'||X.sel[g].length);
-  const unit=m.price+mods.reduce((a,x)=>a+x.p,0);
-  showModal(`<div class="sheet"><header><h2>${esc(m.name)}</h2><button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body">
+  const m=item(X.mid),sep=!X.same&&X.qty>1;
+  const ok=X.units.every(u=>unitOk(m,u));
+  const total=sep?X.units.reduce((a,u)=>a+m.price+unitMods(m,u).reduce((b,x)=>b+x.p,0),0):(m.price+unitMods(m,X.units[0]).reduce((b,x)=>b+x.p,0))*X.qty;
+  const keep=$('#modal .sheet .body'),top=keep?keep.scrollTop:0;
+  showModal(`<div class="sheet"><header><h2>${esc(m.name)}</h2>${HP('options')}<button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body">
+    <div class="grp"><h4>数量</h4><span class="step"><button data-a="xqty" data-d="-1" aria-label="減らす">−</button><span class="num">${X.qty}</span><button data-a="xqty" data-d="1" aria-label="増やす">＋</button></span>
+    ${X.qty>1?`<span class="seg" style="margin-left:10px;vertical-align:middle"><button class="${sep?'':'on'}" data-a="xsame" data-v="1">全部同じ内容</button><button class="${sep?'on':''}" data-a="xsame" data-v="0">1つずつ選ぶ</button></span>`:''}</div>
+    ${sep?`<div class="grp"><div class="utabs">${X.units.map((u,i)=>`<button class="${i===X.cur?'on':''} ${unitOk(m,u)?'':'ng'}" data-a="xunit" data-i="${i}">${i+1}つ目${unitOk(m,u)?'':' <small>未選択</small>'}</button>`).join('')}</div></div>`:''}
     ${m.mods.map(g=>{const G=GROUPS[g];return `<div class="grp"><h4>${G.label}${G.type==='req'?'<em>必須</em>':''}</h4><div class="chips">${G.opts.map(([n,p])=>`<button class="chip ${X.sel[g].includes(n)?'on':''}" data-a="mod" data-g="${g}" data-n="${esc(n)}">${esc(n)}${p?` <span class="num">${p>0?'+':''}${p}円</span>`:''}</button>`).join('')}</div></div>`}).join('')}
-    <div class="grp"><h4>メモ（${esc(CFG.noteHint||'抜き・少なめ など')}）</h4><input class="inp" id="itemNote" style="width:100%" data-i="note" value="${esc(X.note)}" maxlength="40"></div>
-    <div class="grp"><h4>数量</h4><span class="step"><button data-a="xqty" data-d="-1" aria-label="減らす">−</button><span class="num">${X.qty}</span><button data-a="xqty" data-d="1" aria-label="増やす">＋</button></span></div>
-    </div><footer>${X.k?'<button class="btn" data-a="xdel">この行を削除</button>':''}<button class="btn pri" data-a="xok" ${ok?'':'disabled'}>${X.k?'変更を反映':'伝票に追加'}　<span class="num">${yen(unit*X.qty)}</span></button></footer></div>`);
+    <div class="grp"><h4>${sep?(X.cur+1)+'つ目の':''}メモ（${esc(CFG.noteHint||'抜き・少なめ など')}）</h4><input class="inp" id="itemNote" style="width:100%" data-i="note" value="${esc(X.note)}" maxlength="40"></div>
+    </div><footer>${X.k?'<button class="btn" data-a="xdel">この行を削除</button>':''}<button class="btn pri" data-a="xok" ${ok?'':'disabled'}>${X.k?'変更を反映':'伝票に追加'}　<span class="num">${yen(total)}</span></button></footer></div>`);
+  const nb=$('#modal .sheet .body');if(nb&&top)nb.scrollTop=top;
 }
 function commitItem(){
-  const m=item(X.mid),mods=[];
-  m.mods.forEach(g=>GROUPS[g].opts.forEach(([n,p])=>{if(X.sel[g].includes(n))mods.push({g,n,p})}));
-  const d=draft(),note=X.note.trim();
-  if(X.k){const l=d.find(l=>l.k===X.k);if(l){l.mods=mods;l.note=note;l.qty=X.qty}}
-  else d.push({k:uid(),mid:m.id,name:m.name,base:m.price,mods,note,qty:X.qty});
+  const m=item(X.mid),d=draft(),sep=!X.same&&X.qty>1;
+  /* 同じ内容のものは1行にまとめ、違うものは別の行にする */
+  const rows=[];
+  (sep?X.units:[X.units[0]]).forEach(u=>{const mods=unitMods(m,u),note=u.note.trim(),key=mods.map(x=>x.g+':'+x.n).join(',')+'|'+note;
+    const e=rows.find(r=>r.key===key);if(e)e.qty++;else rows.push({key,mods,note,qty:sep?1:X.qty})});
+  const lines=rows.map((r,i)=>({k:i===0&&X.k?X.k:uid(),mid:m.id,name:m.name,base:m.price,mods:r.mods,note:r.note,qty:r.qty}));
+  const at=X.k?d.findIndex(l=>l.k===X.k):-1;
+  if(at>=0)d.splice(at,1,...lines);else d.push(...lines);
   saveDrafts();closeModal();render();
 }
 
@@ -225,7 +239,7 @@ function openPay(){
 }
 function renderPay(){
   const total=Math.max(0,P.sub-P.disc),chg=P.recv-total,ok=!P.busy&&(!isCash(P.method)||P.recv>=total);
-  showModal(`<div class="sheet wide"><header><h2>会計　${esc(P.seat)}</h2><button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body"><div class="pay">
+  showModal(`<div class="sheet wide"><header><h2>会計　${esc(P.seat)}</h2>${HP('pay')}<button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body"><div class="pay">
     <div><div class="plines">${P.lines.map(l=>`<div><span>${esc(l.name)} ×${l.qty}${l.mods.length?`<br><small style="color:var(--muted)">${esc(l.mods.join('・'))}</small>`:''}</span><span class="num">${yen(l.unit*l.qty)}</span></div>`).join('')}</div>
       <div class="fld"><span>小計</span><b class="num">${yen(P.sub)}</b></div>
       <button class="fld ${P.field==='disc'?'on':''}" data-a="field" data-f="disc"><span>値引き（タップして入力）</span><b class="num">−${yen(P.disc)}</b></button>
@@ -311,7 +325,7 @@ function renderSales(main){
     <h2 class="h2">本日の会計履歴（日締め前）</h2>
     <div class="card">${live.length?`<div class="tblwrap"><table><tr><th>No.</th><th>時刻</th><th>席</th><th>支払</th><th class="r">金額</th><th></th></tr>${live.map(s=>`<tr class="${s.void?'void':''}"><td class="num">${s.no}</td><td class="num">${hm(s.at)}</td><td>${esc(s.seat)}</td><td>${esc(METHOD[s.method]||s.method)}</td><td class="r num">${yen(s.total)}</td>
       <td class="r" style="text-decoration:none;opacity:1"><button class="mini" data-a="rcpt" data-id="${s.id}">明細</button> ${s.void?'':`<button class="mini danger" data-a="voidsale" data-id="${s.id}">取消</button>`}</td></tr>`).join('')}</table></div>`:'<p class="empty">日締め前の会計はありません</p>'}</div>
-    <h2 class="h2">日締め</h2>
+    <h2 class="h2">日締め ${HP('closeday')}</h2>
     <div class="card"><p style="margin:0 0 10px;color:var(--muted);font-size:13px">営業終了後に押してください。会計履歴を日別の集計にまとめ、済んだ伝票を片付けます（未会計の伝票は残ります）。</p>
       <button class="btn dark" data-a="closeday" ${S.sales.length?'':'disabled'}>日締めをする</button></div>
     <h2 class="h2">日別の売上（日締め済み）</h2>
@@ -338,28 +352,28 @@ function renderSettings(main,force){
   const secList=[];S.menu.forEach(m=>{if(!secList.find(x=>x.tab===m.tab&&x.sec===m.sec))secList.push({tab:m.tab,sec:m.sec})});
   const reg=S.role==='register';
   main.innerHTML=`<div class="view"><div class="set">
-    <div class="card"><h3>この端末の役割</h3><p>レジに置くタブレットは「メインレジ」、注文を取りに行くスマホは「スタッフ端末」にします。</p>
+    <div class="card"><h3>この端末の役割 ${HP('role')}</h3><p>レジに置くタブレットは「メインレジ」、注文を取りに行くスマホは「スタッフ端末」にします。</p>
       <div class="seg"><button class="${reg?'on':''}" data-a="role" data-r="register">メインレジ</button><button class="${reg?'':'on'}" data-a="role" data-r="staff">スタッフ端末</button></div></div>
-    <div class="card"><h3>担当者名</h3><p>注文に「誰が取ったか」が残ります。</p><div class="row"><input class="inp" id="staffName" value="${esc(S.staff)}" placeholder="例：たなか" maxlength="12"><button class="btn" data-a="savestaff">保存</button></div></div>
-    <div class="card"><h3>新しい注文の通知音</h3><p>メインレジで、スタッフ端末から注文が届いた時に鳴ります。</p>
+    <div class="card"><h3>担当者名 ${HP('staffname')}</h3><p>注文に「誰が取ったか」が残ります。</p><div class="row"><input class="inp" id="staffName" value="${esc(S.staff)}" placeholder="例：たなか" maxlength="12"><button class="btn" data-a="savestaff">保存</button></div></div>
+    <div class="card"><h3>新しい注文の通知音 ${HP('sound')}</h3><p>メインレジで、スタッフ端末から注文が届いた時に鳴ります。</p>
       <div class="row"><div class="seg"><button class="${S.sound?'on':''}" data-a="sound" data-v="1">鳴らす</button><button class="${S.sound?'':'on'}" data-a="sound" data-v="0">鳴らさない</button></div><button class="btn" data-a="testbeep">音を試す</button></div></div>
-    <div class="card"><h3>連動の状態</h3><p>${Store.mode==='fb'?(Store.online?'連動中です。同じ店舗キーで開いている全端末で、注文・会計・売切がすぐに共有されます。':'いまは電波待ちです。入力した内容はこの画面を開いたままにしておけば、電波が戻った時に自動で送られます。'):Store.mode==='db'?'連動中です。同じページを開いている全端末で、注文・会計・売切がすぐに共有されます。':Store.failed?'連動の準備に失敗しました。電波を確認して画面を開き直してください。いまの入力はこの端末の中だけに保存されます。':Store.mode==='local'?'店舗キーなしで開いているため、この端末の中だけに保存するお試しモードです（他の端末とは連動しません）。':'接続を確認しています…'}</p>
+    <div class="card"><h3>連動の状態 ${HP('sync')}</h3><p>${Store.mode==='fb'?(Store.online?'連動中です。同じお店にログインしている全端末で、注文・会計・売切がすぐに共有されます。':'いまは電波待ちです。入力した内容はこの画面を開いたままにしておけば、電波が戻った時に自動で送られます。'):Store.mode==='db'?'連動中です。同じページを開いている全端末で、注文・会計・売切がすぐに共有されます。':Store.failed?'連動の準備に失敗しました。電波を確認して画面を開き直してください。いまの入力はこの端末の中だけに保存されます。':Store.mode==='local'?'店舗キーなしで開いているため、この端末の中だけに保存するお試しモードです（他の端末とは連動しません）。':'接続を確認しています…'}</p>
       ${Store.mode==='fb'?`<h3 style="margin-top:14px">端末を追加する</h3><p>追加したいスマホやタブレットのカメラでこのQRを読み、スタッフ用のIDとパスワードでログインします。</p>
       <div class="row" style="align-items:flex-start"><div class="qr">${qrSvg(joinUrl())}</div><div style="flex:1;min-width:200px"><input class="inp" id="joinUrl" readonly value="${esc(joinUrl())}" style="width:100%"><div class="row" style="margin-top:8px"><button class="btn" data-a="copyjoin">URLをコピー</button></div></div></div>`:''}</div>
-    <div class="card"><h3>ログイン</h3><p>いまのログイン：<b>${esc(ME.login)}</b>（${esc(PA.ROLE[ME.role]||'')}）</p><div class="row"><button class="btn" data-a="logout">ログアウト</button></div></div>
-    ${BOSS?`<div class="card"><h3>スタッフ用ログイン</h3><p>お店の端末で使うIDとパスワードです。作り直すと、古いIDとパスワードは使えなくなります（アルバイトが辞めた時などに）。</p>
+    <div class="card"><h3>ログイン ${HP('mylogin')}</h3><p>いまのログイン：<b>${esc(ME.login)}</b>（${esc(PA.ROLE[ME.role]||'')}）</p><div class="row"><button class="btn" data-a="logout">ログアウト</button></div></div>
+    ${BOSS?`<div class="card"><h3>スタッフ用ログイン ${HP('stafflogin')}</h3><p>お店の端末で使うIDとパスワードです。作り直すと、古いIDとパスワードは使えなくなります（アルバイトが辞めた時などに）。</p>
       <p id="staffNow" style="color:var(--ink)">確認中…</p>
       <div class="lgrid"><label>ログインID<input class="inp" id="slId" autocapitalize="none" spellcheck="false" autocomplete="off" placeholder="例：${esc(SHOP_ID)}-staff"></label>
       <label>新しいパスワード（6文字以上）<input class="inp" id="slPw" type="password" autocomplete="new-password"></label>
       <label>いまのパスワード（同じIDのまま変える時だけ）<input class="inp" id="slCur" type="password" autocomplete="off"></label></div>
       <p class="lerr" id="slMsg"></p><div class="row"><button class="btn dark" data-a="savestafflogin">スタッフ用ログインを作り直す</button></div></div>`:''}
-    ${ME.role==='manager'?`<div class="card"><h3>店長のパスワードを変える</h3><p>店長のIDそのものを変えたい時は、管理者（マスター）に依頼してください。</p>
+    ${ME.role==='manager'?`<div class="card"><h3>店長のパスワードを変える ${HP('managerpass')}</h3><p>店長のIDそのものを変えたい時は、管理者（マスター）に依頼してください。</p>
       <div class="lgrid"><label>いまのパスワード<input class="inp" id="mpCur" type="password" autocomplete="current-password"></label>
       <label>新しいパスワード（6文字以上）<input class="inp" id="mpNew" type="password" autocomplete="new-password"></label></div>
       <p class="lerr" id="mpMsg"></p><div class="row"><button class="btn dark" data-a="changemypass">パスワードを変える</button></div></div>`:''}
-    ${reg&&BOSS?`<div class="card"><h3>席の設定</h3><p>1行に1つ、席やテーブルの名前を書きます。</p>
+    ${reg&&BOSS?`<div class="card"><h3>席の設定 ${HP('seats')}</h3><p>1行に1つ、席やテーブルの名前を書きます。</p>
       <textarea class="inp" id="seatText" rows="6">${esc(S.seats.join('\n'))}</textarea><div class="row" style="margin-top:8px"><button class="btn dark" data-a="saveseats">席を保存</button></div></div>
-    <div class="card"><h3>メニューの編集</h3><p>名前と価格（税込）を直して「メニューを保存」を押すと全端末に反映されます。名前を空にするとその品は消えます。</p>
+    <div class="card"><h3>メニューの編集 ${HP('menuedit')}</h3><p>名前と価格（税込）を直して「メニューを保存」を押すと全端末に反映されます。名前を空にするとその品は消えます。</p>
       ${secList.map(sc=>`<h2 class="h2" style="margin:14px 0 6px">${esc(TABS.find(t=>t[0]===sc.tab)[1])}／${esc(sc.sec)}</h2>${S.menu.filter(m=>m.tab===sc.tab&&m.sec===sc.sec).map(m=>`<div class="mrow"><input class="inp" id="mn_${m.id}" value="${esc(m.name)}" aria-label="品名"><input class="inp num" id="mp_${m.id}" type="number" inputmode="numeric" value="${m.price}" aria-label="価格"><span></span></div>`).join('')}`).join('')}
       <h2 class="h2" style="margin:18px 0 6px">新しい品を追加</h2>
       <div class="row"><select class="inp" id="newSec">${secList.map((sc,i)=>`<option value="${i}">${esc(TABS.find(t=>t[0]===sc.tab)[1])}／${esc(sc.sec)}</option>`).join('')}</select>
@@ -412,7 +426,15 @@ const A={
     if(G.type==='multi')X.sel[d.g]=cur.includes(d.n)?cur.filter(x=>x!==d.n):[...cur,d.n];
     else X.sel[d.g]=cur.includes(d.n)&&G.type==='one'?[]:[d.n];
     renderItemSheet()},
-  xqty(d){X.qty=Math.max(1,X.qty+ +d.d);renderItemSheet()},
+  xqty(d){X.qty=Math.max(1,X.qty+ +d.d);
+    if(X.qty<2){X.same=true;X.units=[X.units[X.cur]||X.units[0]];X.cur=0}
+    else if(!X.same){const m=item(X.mid);while(X.units.length<X.qty){const u={sel:{},note:''};m.mods.forEach(g=>u.sel[g]=[]);X.units.push(u)}
+      X.units.length=X.qty;X.cur=Math.min(X.cur,X.qty-1)}
+    renderItemSheet()},
+  xsame(d){const same=d.v==='1';if(same===X.same){return}
+    if(same){X.units=[X.units[X.cur]];X.cur=0}else{const u=X.units[0];X.units=Array.from({length:X.qty},()=>cloneU(u));X.cur=0}
+    X.same=same;renderItemSheet()},
+  xunit(d){X.cur=Math.max(0,Math.min(X.units.length-1,+d.i));renderItemSheet()},
   xok(){commitItem()},
   xdel(){const dr=draft(),i=dr.findIndex(l=>l.k===X.k);if(i>=0)dr.splice(i,1);saveDrafts();closeModal();render()},
   close(){closeModal()},
@@ -472,7 +494,7 @@ const A={
     S.menu.forEach(m=>{const n=$('#mn_'+m.id),p=$('#mp_'+m.id);if(!n)return items.push(m);const name=n.value.trim();if(!name)return;items.push({...m,name,price:Math.max(0,Math.round(+p.value||0))})});
     const nn=$('#newName').value.trim(),np=Math.round(+$('#newPrice').value||0);
     if(nn){const secList=[];S.menu.forEach(m=>{if(!secList.find(x=>x.tab===m.tab&&x.sec===m.sec))secList.push({tab:m.tab,sec:m.sec})});
-      const sc=secList[+$('#newSec').value]||secList[0];items.push({id:'x'+uid(),tab:sc.tab,sec:sc.sec,name:nn,price:Math.max(0,np),mods:(CFG.newItemMods||{})[sc.tab+'/'+sc.sec]||(CFG.newItemMods||{})[sc.tab]||[]})}
+      const sc=secList[+$('#newSec').value]||secList[0];items.push({id:'x'+uid(),tab:sc.tab,sec:sc.sec,name:nn,price:Math.max(0,np),mods:(CFG.newItemMods||{})[sc.tab+'|'+sc.sec]||(CFG.newItemMods||{})[sc.tab]||[]})}
     w(Store.set('config','menu',{items}),'メニューを保存しました').then(()=>render(true))},
   resetmenu(){confirmBox('初期メニューに戻す','編集した内容を消して、最初のメニューに戻します。','戻す',()=>w(Store.del('config','menu'),'初期メニューに戻しました').then(()=>render(true)))}
 };

@@ -59,7 +59,7 @@ function loginScreen(root,auth,opt){
   opt=opt||{};let brand=null;try{brand=JSON.parse(localStorage.getItem('pos.brand')||'null')}catch(e){}
   if(opt.noBrand)brand=null;
   root.innerHTML=`<div class="login"${brand&&brand.bar?` style="--lg:${esc(brand.bar)}${brand.accent?';--shu:'+esc(brand.accent):''}${brand.ink?';--shu-ink:'+esc(brand.ink):''}"`:''}><div class="lhead">${brand&&brand.img?`<img src="${esc(brand.img)}" alt="${esc(brand.name||'')}">`:`<b>${esc(opt.title||'POSレジ')}</b>`}</div>
-    <form class="lform" id="lform"><label>ログインID<input class="inp" id="lid" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <form class="lform" id="lform"><div class="lhelp">${window.POSHelp?window.POSHelp.btn('login'):''}<span>使い方</span></div><label>ログインID<input class="inp" id="lid" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label>パスワード<input class="inp" id="lpw" type="password" autocomplete="current-password" required></label>
     <p class="lerr" id="lerr"></p><button class="btn pri" id="lbtn">ログイン</button>${opt.extra||''}</form></div>`;
   const f=root.querySelector('#lform');

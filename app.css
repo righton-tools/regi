@@ -250,3 +250,26 @@ textarea.inp{height:auto;padding:10px 12px;width:100%}
 .lerr{margin:0;min-height:1.4em;font-size:13px;font-weight:700;color:var(--shu)}
 .lgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:8px}
 .llink{border:0;background:none;color:var(--muted);text-decoration:underline;min-height:44px;font-size:13px}
+
+/* 使い方の ？ ボタン */
+.hq{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;border:1.5px solid currentColor;background:transparent;color:var(--muted);font-size:15px;font-weight:900;line-height:1;padding:0;vertical-align:middle;flex:none;position:relative}
+.hq::after{content:"";position:absolute;inset:-9px}
+.hq:hover{color:var(--shu)}
+.bar .hq{color:var(--bar-muted)}.bar .hq:hover{color:var(--bar-ink)}
+.lhelp{display:flex;align-items:center;gap:8px;justify-content:flex-end;font-size:12px;color:var(--muted);margin-bottom:-6px}
+.helpov{position:fixed;inset:0;z-index:90;background:var(--scrim);display:grid;place-items:center;padding:16px}
+.helpbox{background:var(--surface);color:var(--ink);border-radius:14px;width:min(100%,560px);max-height:100%;display:flex;flex-direction:column;box-shadow:var(--shadow);overflow:hidden}
+.helpbox>header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.helpbox>header h2{margin:0;font-size:18px;flex:1}
+.helpbox>header b.hq{color:var(--shu);cursor:default}
+.hbody{padding:8px 16px;overflow-y:auto}
+.hbody p{margin:10px 0;line-height:1.7;font-size:15px}
+.helpbox>footer{padding:12px 16px;border-top:1px solid var(--line);display:flex}
+.helpbox>footer .btn{flex:1}
+@media print{.helpov{display:none!important}}
+
+.utabs{display:flex;flex-wrap:wrap;gap:8px}
+.utabs button{border:2px solid var(--line);background:var(--surface);border-radius:10px;min-height:48px;padding:0 16px;font-weight:700}
+.utabs button.on{border-color:var(--shu);background:var(--shu);color:var(--shu-ink)}
+.utabs button.ng:not(.on){border-style:dashed}
+.utabs small{font-weight:400;font-size:11px;margin-left:4px}

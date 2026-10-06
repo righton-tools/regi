@@ -1,6 +1,6 @@
 // マスター画面：マスターとしてログインした人だけが、全店の売上・注文を見られて、店の追加とログインの発行ができる
 (()=>{
-const ROOT=document.getElementById('root'),PA=window.POSAuth,esc=PA.esc;
+const ROOT=document.getElementById('root'),PA=window.POSAuth,esc=PA.esc,HP=k=>window.POSHelp?window.POSHelp.btn(k):'';
 const yen=n=>'¥'+Math.round(n||0).toLocaleString('ja-JP');
 const p2=n=>String(n).padStart(2,'0');
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
@@ -17,7 +17,7 @@ const list=v=>Object.entries(v||{}).map(([id,x])=>({...x,id}));
 /* ---- はじめての設定（マスターのIDとパスワードを決める） ---- */
 function firstRun(){
   ROOT.innerHTML=`<div class="login"><div class="lhead"><b>はじめての設定</b></div>
-    <form class="lform" id="fform"><p style="margin:0;font-size:13px;color:var(--muted)">マスター（全店を見られる人）のログインIDとパスワードを決めます。決められるのは最初の1回だけです。</p>
+    <form class="lform" id="fform"><div class="lhelp">${HP('first')}<span>使い方</span></div><p style="margin:0;font-size:13px;color:var(--muted)">マスター（全店を見られる人）のログインIDとパスワードを決めます。決められるのは最初の1回だけです。</p>
     <label>マスターのログインID（半角の英小文字・数字）<input class="inp" id="fid" autocapitalize="none" spellcheck="false" autocomplete="username" required></label>
     <label>パスワード（6文字以上）<input class="inp" id="fpw" type="password" autocomplete="new-password" required></label>
     <label>パスワード（もう一度）<input class="inp" id="fpw2" type="password" autocomplete="new-password" required></label>
@@ -45,11 +45,11 @@ function showLogin(){
 /* ---- 一覧画面 ---- */
 function build(){
   built=true;
-  ROOT.innerHTML=`<div class="mwrap"><header class="bar"><div class="logo"><b>POS</b><span>マスター</span></div><div class="tabs"></div><div class="meta"><span class="clock num" id="mtotal"></span><button class="mini" id="mout" style="color:var(--ink)">ログアウト</button></div></header>
+  ROOT.innerHTML=`<div class="mwrap"><header class="bar"><div class="logo"><b>POS</b><span>マスター</span></div><div class="tabs"></div><div class="meta">${HP('master')}<span class="clock num" id="mtotal"></span><button class="mini" id="mout" style="color:var(--ink)">ログアウト</button></div></header>
     <div class="mbody"><div class="shops" id="mshops"><p class="empty" id="mempty">まだ店舗がありません。下から店舗設定ファイルを選んで追加してください。</p></div>
-    <div class="card"><h3 style="margin:0 0 4px">店舗の追加・設定の更新</h3><p style="margin:0 0 10px;color:var(--muted);font-size:13px">店舗設定ファイル（shops フォルダの 店舗ID.json）を選ぶと、新しい店は登録され、登録済みの店は設定だけが新しくなります。売上や注文のデータは消えません。</p>
+    <div class="card"><h3 style="margin:0 0 4px">店舗の追加・設定の更新 ${HP('addshop')}</h3><p style="margin:0 0 10px;color:var(--muted);font-size:13px">店舗設定ファイル（shops フォルダの 店舗ID.json）を選ぶと、新しい店は登録され、登録済みの店は設定だけが新しくなります。売上や注文のデータは消えません。</p>
       <input type="file" id="mfile" accept=".json,application/json" class="inp" style="height:auto;padding:10px;max-width:100%"><p id="mmsg" class="lerr" style="margin-top:10px"></p></div>
-    <div class="card"><h3 style="margin:0 0 10px">マスターのパスワードを変える</h3>
+    <div class="card"><h3 style="margin:0 0 10px">マスターのパスワードを変える ${HP('masterpass')}</h3>
       <div class="lgrid"><label>いまのパスワード<input class="inp" id="xpCur" type="password" autocomplete="current-password"></label><label>新しいパスワード（6文字以上）<input class="inp" id="xpNew" type="password" autocomplete="new-password"></label></div>
       <p class="lerr" id="xpMsg"></p><button class="btn dark" id="xpBtn">パスワードを変える</button></div></div></div>`;
   ROOT.querySelector('#mfile').addEventListener('change',addShop);
@@ -68,16 +68,16 @@ function card(id){
   let el=document.getElementById('shop_'+id);if(el)return el;
   el=document.createElement('section');el.className='card shop';el.id='shop_'+id;
   const url=base+'?shop='+id;
-  el.innerHTML=`<h3><span data-f="name"></span><small>${esc(id)}</small></h3><div data-f="stats"></div>
+  el.innerHTML=`<h3><span><span data-f="name"></span> ${HP('shopcard')}</span><small>${esc(id)}</small></h3><div data-f="stats"></div>
     <div class="row"><a class="btn pri" style="flex:1" href="${esc(url)}&r=register" target="_blank" rel="noopener">レジを開く</a><a class="btn" style="flex:1" href="${esc(url)}&r=staff" target="_blank" rel="noopener">スタッフ画面</a></div>
-    <details><summary>ログインの設定（店長・スタッフ）</summary><p data-f="logins" style="margin:6px 0 10px;font-size:13px"></p>
+    <details><summary>ログインの設定（店長・スタッフ） ${HP('logins')}</summary><p data-f="logins" style="margin:6px 0 10px;font-size:13px"></p>
       <div class="lgrid"><label>種類<select class="inp" data-i="role"><option value="manager">店長用（お店の責任者）</option><option value="staff">スタッフ用（お店の端末）</option></select></label>
       <label>ログインID<input class="inp" data-i="id" autocapitalize="none" spellcheck="false" autocomplete="off"></label>
       <label>新しいパスワード（6文字以上）<input class="inp" data-i="pw" type="password" autocomplete="new-password"></label>
       <label>いまのパスワード（同じIDのまま変える時だけ）<input class="inp" data-i="cur" type="password" autocomplete="off"></label></div>
       <p class="lerr" data-f="lmsg"></p><button class="btn dark" data-b="login">このログインを作る・作り直す</button>
       <p style="margin:10px 0 0;font-size:12px;color:var(--muted)">作り直すと、同じ種類の古いログインは使えなくなります。お店の人が開くページ：<span class="num">${esc(base)}</span></p></details>
-    <details><summary>日別の売上（日締め済み・直近31日）</summary><div data-f="days"></div></details>`;
+    <details><summary>日別の売上（日締め済み・直近31日） ${HP('days')}</summary><div data-f="days"></div></details>`;
   el.querySelector('[data-b="login"]').onclick=async e=>{const q=s=>el.querySelector(s),m=q('[data-f="lmsg"]');m.textContent='作成中…';e.target.disabled=true;
     try{const r=await PA.replaceLogin(DB,id,q('[data-i="role"]').value,q('[data-i="id"]').value,q('[data-i="pw"]').value,q('[data-i="cur"]').value);
       m.textContent='ログイン「'+r.login+'」を作りました。'+(r.removed?'古いログインは使えなくなりました。':'');q('[data-i="pw"]').value='';q('[data-i="cur"]').value='';loadLogins(id)}
@@ -111,6 +111,8 @@ async function addShop(e){
     const cfg=JSON.parse(await f.text());
     if(!/^[a-z0-9-]{2,30}$/.test(cfg.id||''))throw new Error('id は半角の英小文字・数字・ハイフンで書いてください');
     if(!cfg.name||!Array.isArray(cfg.menu)||!Array.isArray(cfg.tabs)||!Array.isArray(cfg.seats)||!Array.isArray(cfg.payments))throw new Error('name・tabs・menu・seats・payments が必要です');
+    const badKey=(o,p)=>{if(o&&typeof o==='object'&&!Array.isArray(o))for(const k of Object.keys(o)){if(k===''||/[.#$\/\[\]]/.test(k))return p+k;const r=badKey(o[k],p+k+' → ');if(r)return r}else if(Array.isArray(o))for(const v of o){const r=badKey(v,p);if(r)return r}return ''};
+    const bk=badKey(cfg,'');if(bk)throw new Error('設定ファイルの項目名に使えない文字（. # $ / [ ]）があります：'+bk);
     const ex=shops[cfg.id];
     await DB.ref('shops/'+cfg.id+'/setup').set(cfg);
     await DB.ref('index/'+cfg.id).set({name:cfg.name});
