@@ -268,8 +268,15 @@ textarea.inp{height:auto;padding:10px 12px;width:100%}
 .helpbox>footer .btn{flex:1}
 @media print{.helpov{display:none!important}}
 
-.utabs{display:flex;flex-wrap:wrap;gap:8px}
-.utabs button{border:2px solid var(--line);background:var(--surface);border-radius:10px;min-height:48px;padding:0 16px;font-weight:700}
-.utabs button.on{border-color:var(--shu);background:var(--shu);color:var(--shu-ink)}
+.utabs{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.utabs button{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;border:2px solid var(--line);background:var(--surface);border-radius:10px;min-height:54px;padding:6px 14px;font-weight:700;max-width:180px;text-align:left;opacity:.75}
+.utabs button b{font-size:15px}
+.utabs small{font-weight:400;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.utabs button.on{opacity:1;border-color:var(--shu);background:var(--shu);color:var(--shu-ink);min-height:62px;border-radius:10px 10px 0 0;border-bottom-width:0;padding-bottom:10px;box-shadow:0 -2px 8px rgba(0,0,0,.12)}
+.utabs button.on b{font-size:17px}
+.utabs button.on small{color:inherit;font-weight:700}
 .utabs button.ng:not(.on){border-style:dashed}
-.utabs small{font-weight:400;font-size:11px;margin-left:4px}
+.upanel{border:2px solid var(--shu);border-radius:0 10px 10px 10px;padding:12px 12px 0;margin-bottom:14px;background:var(--shu-soft)}
+.upanel .chip{background:var(--surface)}
+.upanel .chip.on{background:var(--shu);color:var(--shu-ink)}
+.uhead{font-weight:700;color:var(--shu);margin-bottom:10px;font-size:15px}

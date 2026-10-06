@@ -206,9 +206,11 @@ function renderItemSheet(){
   showModal(`<div class="sheet"><header><h2>${esc(m.name)}</h2>${HP('options')}<button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body">
     <div class="grp"><h4>数量</h4><span class="step"><button data-a="xqty" data-d="-1" aria-label="減らす">−</button><span class="num">${X.qty}</span><button data-a="xqty" data-d="1" aria-label="増やす">＋</button></span>
     ${X.qty>1?`<span class="seg" style="margin-left:10px;vertical-align:middle"><button class="${sep?'':'on'}" data-a="xsame" data-v="1">全部同じ内容</button><button class="${sep?'on':''}" data-a="xsame" data-v="0">1つずつ選ぶ</button></span>`:''}</div>
-    ${sep?`<div class="grp"><div class="utabs">${X.units.map((u,i)=>`<button class="${i===X.cur?'on':''} ${unitOk(m,u)?'':'ng'}" data-a="xunit" data-i="${i}">${i+1}つ目${unitOk(m,u)?'':' <small>未選択</small>'}</button>`).join('')}</div></div>`:''}
+    ${sep?`<div class="grp" style="margin-bottom:0"><h4>どれの内容を選ぶか、押して切り替えます</h4><div class="utabs">${X.units.map((u,i)=>{const sm=[...unitMods(m,u).map(x=>x.n),u.note.trim()].filter(Boolean).join('・');return `<button class="${i===X.cur?'on':''} ${unitOk(m,u)?'':'ng'}" data-a="xunit" data-i="${i}" ${i===X.cur?'aria-current="true"':''}><b>${i===X.cur?'✎ ':''}${i+1}つ目</b><small>${i===X.cur?'いま選択中':unitOk(m,u)?esc(sm||'追加なし'):'未選択'}</small></button>`}).join('')}</div></div>
+    <div class="upanel"><div class="uhead">${X.cur+1}つ目（全${X.qty}つ）の内容を選んでいます</div>`:''}
     ${m.mods.map(g=>{const G=GROUPS[g];return `<div class="grp"><h4>${G.label}${G.type==='req'?'<em>必須</em>':''}</h4><div class="chips">${G.opts.map(([n,p])=>`<button class="chip ${X.sel[g].includes(n)?'on':''}" data-a="mod" data-g="${g}" data-n="${esc(n)}">${esc(n)}${p?` <span class="num">${p>0?'+':''}${p}円</span>`:''}</button>`).join('')}</div></div>`}).join('')}
     <div class="grp"><h4>${sep?(X.cur+1)+'つ目の':''}メモ（${esc(CFG.noteHint||'抜き・少なめ など')}）</h4><input class="inp" id="itemNote" style="width:100%" data-i="note" value="${esc(X.note)}" maxlength="40"></div>
+    ${sep?'</div>':''}
     </div><footer>${X.k?'<button class="btn" data-a="xdel">この行を削除</button>':''}<button class="btn pri" data-a="xok" ${ok?'':'disabled'}>${X.k?'変更を反映':'伝票に追加'}　<span class="num">${yen(total)}</span></button></footer></div>`);
   const nb=$('#modal .sheet .body');if(nb&&top)nb.scrollTop=top;
 }
