@@ -6,7 +6,7 @@ self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.
 self.addEventListener('fetch',e=>{
   const r=e.request;if(r.method!=='GET')return;
   const u=new URL(r.url);
-  if(u.hostname.endsWith('firebasedatabase.app')||u.hostname.endsWith('firebaseio.com'))return;
+  if(u.hostname.endsWith('firebasedatabase.app')||u.hostname.endsWith('firebaseio.com')||u.hostname.endsWith('jma.go.jp'))return;
   if(u.origin===location.origin){
     e.respondWith(fetch(r).then(res=>{if(res.ok){const c=res.clone();caches.open(C).then(x=>x.put(r,c))}return res}).catch(()=>caches.match(r,{ignoreSearch:true})));return}
   e.respondWith(caches.match(r).then(hit=>hit||fetch(r).then(res=>{if(res.ok||res.type==='opaque'){const c=res.clone();caches.open(C).then(x=>x.put(r,c))}return res})));

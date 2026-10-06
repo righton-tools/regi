@@ -2,7 +2,7 @@
 window.startPOS=function(CFG,SHOP_ID,DB,ME){
 'use strict';
 const ROOT=document.getElementById('root');
-ROOT.innerHTML='<div id="app">  <header class="bar">    <div class="logo"><b></b><span></span></div>    <nav class="tabs" id="tabs"></nav>    <div class="meta"><span id="barhelp"></span><span class="pill" id="sync"><i></i><span>接続中</span></span><span class="clock num" id="clock"></span></div>  </header>  <main id="main"></main></div><div id="modal" hidden></div><div id="toasts"></div>';
+ROOT.innerHTML='<div id="app">  <header class="bar">    <div class="logo"><b></b><span></span></div>    <nav class="tabs" id="tabs"></nav>    <div class="meta"><span id="barhelp"></span><span class="pill" id="sync"><i></i><span>接続中</span></span><span class="clock num" id="clock"></span></div>  </header>  <div id="wxask" hidden></div>  <main id="main"></main></div><div id="modal" hidden></div><div id="toasts"></div>';
 document.title=CFG.name+' POSレジ';
 if(CFG.logoImg){const L=document.querySelector('.logo');L.classList.add('haslogo');L.innerHTML='<img alt=""><span></span>';L.querySelector('img').src=CFG.logoImg;L.querySelector('img').alt=CFG.name}
 else document.querySelector('.logo b').textContent=CFG.logo||CFG.name;
@@ -43,6 +43,21 @@ const METHODS=CFG.payments,METHOD=Object.fromEntries(METHODS.map(m=>[m.id,m.name
 const secTime=n=>{const w=(CFG.timeSections||[]).find(x=>x.sec===n);if(!w)return '';const d=new Date(),m=d.getHours()*60+d.getMinutes(),t=x=>+x.split(':')[0]*60+ +x.split(':')[1];
   return `<em>${w.from}〜${w.to}${m>=t(w.from)&&m<=t(w.to)?'':'（時間外）'}</em>`};
 const ST={new:'新着',cooking:'調理中',served:'提供済'};
+
+/* ---------- 会計のときに任意で残す記録項目・天気 ---------- */
+const DEFAULT_TAGS=(CFG.tags||[
+  {id:'pax',name:'人数',type:'num',on:true},
+  {id:'sex',name:'性別',type:'one',opts:['男性','女性','男女'],on:true},
+  {id:'age',name:'年齢層',type:'one',opts:['10代以下','20代','30代','40代','50代','60代以上'],on:true},
+  {id:'grp',name:'利用',type:'one',opts:['ひとり','友人','カップル','家族','仕事'],on:false},
+  {id:'rep',name:'来店',type:'one',opts:['はじめて','リピート','常連'],on:false},
+  {id:'via',name:'きっかけ',type:'one',opts:['通りがかり','SNS','ネット検索','紹介','チラシ・看板'],on:false},
+  {id:'memo',name:'ひとことメモ',type:'text',on:false}]).map(t=>({...t,opts:t.opts||[]}));
+const TAGTYPE={one:'1つ選ぶ',multi:'いくつでも選ぶ',num:'数を入れる',text:'文字で書く'};
+const WXC=CFG.weather||{office:'400000',area:'400010',amedas:'82182'};
+const WX=['晴れ','くもり','雨','雪'],DOW=['日','月','火','水','木','金','土'];
+const dstr=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+const dparse=s=>{const a=s.split('-').map(Number);return new Date(a[0],a[1]-1,a[2])};
 
 
 /* ---------- 保存先（共有DB。使えない時はこの端末内に保存） ---------- */
@@ -89,7 +104,7 @@ const S={
   role:ls.get('role',null)||(['staff','register'].includes(QS.get('r'))?QS.get('r'):window.innerWidth>=900?'register':'staff'),
   tab:'order',cat:TABS[0][0],seat:null,soldMode:false,
   staff:ls.get('staff',''),sound:ls.get('sound',true),
-  orders:[],sales:[],days:[],menu:DEFAULT_MENU,seats:DEFAULT_SEATS,sold:[],
+  orders:[],sales:[],days:[],wx:[],tags:DEFAULT_TAGS,per:{k:'day',off:0},menu:DEFAULT_MENU,seats:DEFAULT_SEATS,sold:[],
   drafts:ls.get('drafts',{}),customMenu:false
 };
 S.seat=S.seats[0];
@@ -128,7 +143,7 @@ function detectNew(arr){
 /* ---------- 画面：上部バー ---------- */
 function renderBar(){
   const nNew=S.orders.filter(o=>o.status==='new').length;
-  const tabs=S.role==='register'?[['order','注文・会計'],['feed','オーダー'],['sales','売上'],['settings','設定']]:[['order','注文'],['feed','オーダー'],['settings','設定']];
+  const tabs=S.role==='register'?[['order','注文・会計'],['feed','オーダー'],['sales','売上'],['settings','設定']]:BOSS?[['order','注文'],['feed','オーダー'],['sales','売上'],['settings','設定']]:[['order','注文'],['feed','オーダー'],['settings','設定']];
   $('#tabs').innerHTML=tabs.map(([k,n])=>`<button class="tab ${S.tab===k?'on':''}" data-a="tab" data-t="${k}">${n}${k==='feed'&&nNew?`<span class="badge num">${nNew}</span>`:''}</button>`).join('');
   const live=Store.mode==='db'||(Store.mode==='fb'&&Store.online);
   const s=$('#sync');s.className='pill '+(live?'live':Store.mode==='wait'?'':'local');
@@ -236,16 +251,17 @@ function mergeLines(os){
 }
 function openPay(){
   const os=openOrders(S.seat);if(!os.length)return;
-  P={seat:S.seat,ids:os.map(o=>o.id),lines:mergeLines(os),sub:sumOrders(os),disc:0,recv:0,method:METHODS[0].id,field:isCash(METHODS[0].id)?'recv':'',busy:false};
+  P={seat:S.seat,ids:os.map(o=>o.id),lines:mergeLines(os),sub:sumOrders(os),disc:0,recv:0,method:METHODS[0].id,field:isCash(METHODS[0].id)?'recv':'',busy:false,tags:{},notes:{}};
   renderPay();
 }
 function renderPay(){
   const total=Math.max(0,P.sub-P.disc),chg=P.recv-total,ok=!P.busy&&(!isCash(P.method)||P.recv>=total);
+  const tf=tagFields(P.tags,P.notes),kb=$('#modal .sheet .body'),ktop=kb?kb.scrollTop:0;
   showModal(`<div class="sheet wide"><header><h2>会計　${esc(P.seat)}</h2>${HP('pay')}<button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body"><div class="pay">
     <div><div class="plines">${P.lines.map(l=>`<div><span>${esc(l.name)} ×${l.qty}${l.mods.length?`<br><small style="color:var(--muted)">${esc(l.mods.join('・'))}</small>`:''}</span><span class="num">${yen(l.unit*l.qty)}</span></div>`).join('')}</div>
       <div class="fld"><span>小計</span><b class="num">${yen(P.sub)}</b></div>
       <button class="fld ${P.field==='disc'?'on':''}" data-a="field" data-f="disc"><span>値引き（タップして入力）</span><b class="num">−${yen(P.disc)}</b></button>
-      <div class="fld big"><span>合計（税込）<br><small style="color:var(--muted)">内消費税${rateFor(P.seat)}% ${yen(taxOf(total,rateFor(P.seat)))}</small></span><b class="num">${yen(total)}</b></div></div>
+      <div class="fld big"><span>合計（税込）<br><small style="color:var(--muted)">内消費税${rateFor(P.seat)}% ${yen(taxOf(total,rateFor(P.seat)))}</small></span><b class="num">${yen(total)}</b></div>${tf?`<div class="ptags"><h3>お客様の記録 <small>任意です。押さなくても会計できます</small> ${HP('tags')}</h3><div class="ptg">${tf}</div></div>`:''}</div>
     <div><div class="seg" style="width:100%">${METHODS.map(m=>`<button style="flex:1" class="${P.method===m.id?'on':''}" data-a="method" data-m="${m.id}">${esc(m.name)}</button>`).join('')}</div>
       ${isCash(P.method)?`<button class="fld ${P.field==='recv'?'on':''}" data-a="field" data-f="recv"><span>お預かり</span><b class="num">${yen(P.recv)}</b></button>
       <div class="fld ${chg>=0&&P.recv?'chg':''}"><span>お釣り</span><b class="num">${P.recv?(chg>=0?yen(chg):'不足 '+yen(-chg)):'—'}</b></div>
@@ -253,6 +269,7 @@ function renderPay(){
       :`<p class="hint" style="margin:16px 0">${esc(METHOD[P.method])}で ${yen(total)} の支払い完了を確認してから確定してください。</p>`}
       <div class="pad">${['7','8','9','4','5','6','1','2','3','0','00','C'].map(k=>`<button data-a="key" data-k="${k}">${k==='C'?'クリア':k}</button>`).join('')}</div></div>
     </div></div><footer><button class="btn" data-a="close">戻る</button><button class="btn pri" data-a="payok" ${ok?'':'disabled'}>${P.busy?'処理中…':'会計を確定 '+yen(total)}</button></footer></div>`);
+  const nb=$('#modal .sheet .body');if(nb&&ktop)nb.scrollTop=ktop;
 }
 function receiptText(s){
   const L=[SHOP.name,SHOP.addr,SHOP.tel&&'TEL '+SHOP.tel,'--------------------------------',dayOf(s.at)+' '+hm(s.at)+'　No.'+s.no+'　'+s.seat,'--------------------------------'];
@@ -272,13 +289,31 @@ async function confirmPay(){
   const no=S.sales.filter(s=>s.day===day).length+(closed?closed.count||0:0)+1;
   const id=uid();
   const sale={no,at:now,day,seat:P.seat,lines:P.lines,subtotal:P.sub,discount:P.disc,total,taxRate:rateFor(P.seat),tax:taxOf(total,rateFor(P.seat)),method:P.method,
-    received:isCash(P.method)?P.recv:total,change:isCash(P.method)?P.recv-total:0,orderIds:P.ids,by:who(),void:false};
+    received:isCash(P.method)?P.recv:total,change:isCash(P.method)?P.recv-total:0,orderIds:P.ids,by:who(),void:false,tags:P.tags,notes:cleanNotes(P.notes)};
   if(!await w(Store.set('sales',id,sale))){P.busy=false;renderPay();return}
   for(const oid of P.ids)await w(Store.update('orders',oid,{paid:true,saleId:id}));
   P=null;
   showModal(`<div class="sheet"><header><h2>会計が完了しました</h2></header><div class="body">
     <div class="done">${isCash(sale.method)?`<span>お釣り</span><b class="num">${yen(sale.change)}</b>`:`<span>${esc(METHOD[sale.method])}</span><b class="num">${yen(sale.total)}</b>`}</div>
     <pre class="rcpt">${esc(receiptText(sale))}</pre></div><footer>${CAN_PRINT?'<button class="btn" data-a="print">レシートを印刷</button>':''}<button class="btn pri" data-a="close">閉じる</button></footer></div>`);
+}
+
+/* ---------- お客様の記録（会計時・任意） ---------- */
+let E=null;
+const TG=()=>P||E;
+const tgRedraw=()=>{if(P)renderPay();else if(E)renderTagEdit()};
+const cleanNotes=n=>{const o={};for(const k in n||{}){const v=String(n[k]||'').trim();if(v)o[k]=v.slice(0,60)}return o};
+function tagFields(v,nt){
+  return S.tags.filter(t=>t.on).map(t=>`<div class="grp"><h4>${esc(t.name)}</h4>${
+    t.type==='num'?`<span class="step"><button data-a="tgnum" data-t="${t.id}" data-d="-1" aria-label="減らす">−</button><span class="num">${v[t.id]==null?'—':v[t.id]}</span><button data-a="tgnum" data-t="${t.id}" data-d="1" aria-label="増やす">＋</button></span>`
+    :t.type==='text'?`<input class="inp" style="width:100%" data-i="tgtext" data-t="${t.id}" value="${esc(nt[t.id]||'')}" maxlength="60">`
+    :`<div class="chips">${t.opts.map((o,i)=>`<button class="chip ${[].concat(v[t.id]==null?[]:v[t.id]).includes(o)?'on':''}" data-a="tgopt" data-t="${t.id}" data-o="${i}">${esc(o)}</button>`).join('')}</div>`}</div>`).join('');
+}
+function renderTagEdit(){
+  const s=S.sales.find(x=>x.id===E.id);if(!s){closeModal();return}
+  const keep=$('#modal .sheet .body'),top=keep?keep.scrollTop:0;
+  showModal(`<div class="sheet"><header><h2>お客様の記録　No.${s.no}</h2>${HP('tags')}<button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body">${tagFields(E.tags,E.notes)||'<p class="empty">使う記録項目がありません。設定の「会計のときの記録項目」で選べます。</p>'}</div><footer><button class="btn" data-a="close">やめる</button><button class="btn pri" data-a="tgsave">保存</button></footer></div>`);
+  const nb=$('#modal .sheet .body');if(nb&&top)nb.scrollTop=top;
 }
 
 /* ---------- オーダー一覧 ---------- */
@@ -294,44 +329,109 @@ function renderFeed(main){
     :`<p class="empty">未提供のオーダーはありません。<br>スタッフ端末やレジで注文を送信すると、ここに並びます。品名をタップすると出した品に線が引けます。</p>`}</div>`;
 }
 
-/* ---------- 売上 ---------- */
+/* ---------- 売上・集計 ---------- */
+function addTg(map,e){const k=e.t+'|'+e.o,x=map[k]||(map[k]={t:e.t,tn:e.tn||e.t,o:e.o,c:0,a:0,n:0});x.c+=e.c||0;x.a+=e.a||0;x.n+=e.n||0;if(e.tn)x.tn=e.tn}
+const norm=d=>({total:d.total||0,count:d.count||0,pay:d.pay||{},disc:d.disc||0,items:d.items||[],
+  hours:Array.from({length:24},(_,h)=>(d.hours||[])[h]||0),hc:Array.from({length:24},(_,h)=>(d.hc||[])[h]||0),tg:(d.tg||[]).map(e=>({...e,o:e.o||''}))});
 function summarize(sales){
-  const s={total:0,count:0,pay:{},disc:0,items:[],hours:Array(24).fill(0)};const im={};
-  sales.forEach(x=>{if(x.void)return;s.total+=x.total;s.count++;s.pay[x.method]=(s.pay[x.method]||0)+x.total;s.disc+=x.discount||0;s.hours[new Date(x.at).getHours()]+=x.total;
-    x.lines.forEach(l=>{const e=im[l.name]||(im[l.name]={n:l.name,q:0,a:0});e.q+=l.qty;e.a+=l.unit*l.qty})});
-  s.items=Object.values(im);return s;
+  const s={total:0,count:0,pay:{},disc:0,items:[],hours:Array(24).fill(0),hc:Array(24).fill(0),tg:[]};const im={},tm={};
+  sales.forEach(x=>{if(x.void)return;const h=new Date(x.at).getHours();
+    s.total+=x.total;s.count++;s.pay[x.method]=(s.pay[x.method]||0)+x.total;s.disc+=x.discount||0;s.hours[h]+=x.total;s.hc[h]++;
+    const tv=x.tags||{};for(const id in tv){const t=S.tags.find(z=>z.id===id),tn=t?t.name:id,v=tv[id];
+      if(typeof v==='number')addTg(tm,{t:id,tn,o:'',c:1,a:x.total,n:v});
+      else [].concat(v).forEach(o=>addTg(tm,{t:id,tn,o:String(o),c:1,a:x.total,n:0}))}
+    (x.lines||[]).forEach(l=>{const e=im[l.name]||(im[l.name]={n:l.name,q:0,a:0});e.q+=l.qty;e.a+=l.unit*l.qty})});
+  s.items=Object.values(im);s.tg=Object.values(tm);return s;
 }
 function mergeSum(a,b){
-  if(!a)return b;const im={},pay={...(a.pay||{})};for(const k in b.pay)pay[k]=(pay[k]||0)+b.pay[k];
-  [...(a.items||[]),...(b.items||[])].forEach(i=>{const e=im[i.n]||(im[i.n]={n:i.n,q:0,a:0});e.q+=i.q;e.a+=i.a});
-  return {total:(a.total||0)+b.total,count:(a.count||0)+b.count,pay,disc:(a.disc||0)+b.disc,
-    items:Object.values(im),hours:Array.from({length:24},(_,h)=>((a.hours||[])[h]||0)+b.hours[h])};
+  b=norm(b);if(!a)return b;a=norm(a);
+  const im={},tm={},pay={...a.pay};for(const k in b.pay)pay[k]=(pay[k]||0)+b.pay[k];
+  [...a.items,...b.items].forEach(i=>{const e=im[i.n]||(im[i.n]={n:i.n,q:0,a:0});e.q+=i.q;e.a+=i.a});
+  [...a.tg,...b.tg].forEach(e=>addTg(tm,e));
+  return {total:a.total+b.total,count:a.count+b.count,pay,disc:a.disc+b.disc,items:Object.values(im),
+    hours:a.hours.map((v,h)=>v+b.hours[h]),hc:a.hc.map((v,h)=>v+b.hc[h]),tg:Object.values(tm)};
 }
+function periodRange(){
+  const k=S.per.k,o=S.per.off,n=new Date();n.setHours(0,0,0,0);let a,b,label;
+  if(k==='day'){a=new Date(n);a.setDate(a.getDate()-o);b=new Date(a);label=dstr(a)+'（'+DOW[a.getDay()]+'）'}
+  else if(k==='week'){a=new Date(n);a.setDate(a.getDate()-((a.getDay()+6)%7)-7*o);b=new Date(a);b.setDate(b.getDate()+6);label=(a.getMonth()+1)+'/'+a.getDate()+'（月）〜'+(b.getMonth()+1)+'/'+b.getDate()+'（日）'}
+  else if(k==='month'){a=new Date(n.getFullYear(),n.getMonth()-o,1);b=new Date(a.getFullYear(),a.getMonth()+1,0);label=a.getFullYear()+'年'+(a.getMonth()+1)+'月'}
+  else{a=new Date(n.getFullYear()-o,0,1);b=new Date(a.getFullYear(),11,31);label=a.getFullYear()+'年'}
+  return {from:dstr(a),to:dstr(b),label};
+}
+function daySums(from,to){
+  const m={};S.days.forEach(d=>{if(d.id>=from&&d.id<=to)m[d.id]=norm(d)});
+  const by={};S.sales.forEach(s=>{if(s.day>=from&&s.day<=to)(by[s.day]=by[s.day]||[]).push(s)});
+  for(const d in by)m[d]=mergeSum(m[d],summarize(by[d]));
+  return m;
+}
+const wxOf=d=>S.wx.find(x=>x.id===d);
+const wxName=x=>x?(x.mw||x.aw||x.ow||''):'';
+const wxTemp=x=>x&&x.hi!=null?`${x.hi}℃／${x.lo}℃`:'';
+const paxOf=t=>(t.tg||[]).find(e=>e.t==='pax'&&e.o==='');
+const bars=(rows,w)=>{const mx=Math.max(1,...rows.map(r=>r[1]));return rows.map(r=>`<div class="hbar" style="grid-template-columns:${w||44}px minmax(0,1fr) 150px"><span class="num">${esc(r[0])}</span><span><i style="width:${Math.round(r[1]/mx*100)}%"></i></span><span class="num">${r[2]!=null?esc(r[2]):yen(r[1])}</span></div>`).join('')};
+const dlabel=d=>{const x=dparse(d);return (x.getMonth()+1)+'/'+x.getDate()+'('+DOW[x.getDay()]+')'};
 function renderSales(main){
+  const se=document.scrollingElement,keep=main.dataset.view==='sales'?[main.scrollTop,se?se.scrollTop:0,(main.firstElementChild||{}).scrollTop||0]:null;
   main.dataset.view='sales';
-  const today=dayOf(Date.now()),live=S.sales.filter(s=>s.day===today).sort((a,b)=>b.at-a.at);
-  const t=mergeSum(S.days.find(d=>d.id===today),summarize(live));
-  const maxH=Math.max(1,...t.hours),hrs=t.hours.map((v,h)=>[h,v]).filter(x=>x[1]>0);
-  const rank=[...t.items].sort((a,b)=>b.q-a.q).slice(0,15);
-  const past=[...S.days].sort((a,b)=>a.id<b.id?1:-1).slice(0,60);
-  const open=S.orders.filter(o=>!o.paid).length;
-  main.innerHTML=`<div class="view"><h1 class="h1">本日の売上 <small class="num" style="color:var(--muted);font-size:14px">${today}</small></h1>
+  const R=periodRange(),k=S.per.k,today=dayOf(Date.now()),isToday=k==='day'&&S.per.off===0;
+  const hv=(tt,h)=>yen(tt.hours[h])+(tt.hc.reduce((a,b)=>a+b,0)===tt.count?'・'+tt.hc[h]+'件':'');
+  const dm=daySums(R.from,R.to),dkeys=Object.keys(dm).sort();
+  let t=null;dkeys.forEach(d=>{t=mergeSum(t,dm[d])});t=t||summarize([]);
+  const live=S.sales.filter(s=>s.day===today).sort((a,b)=>b.at-a.at);
+  const open=S.orders.filter(o=>!o.paid).length,pax=paxOf(t);
+  const card=(title,body,help)=>`<div class="card"><h2 class="h2" style="margin-top:0">${title}${help?' '+HP(help):''}</h2>${body}</div>`;
+  /* 推移 */
+  let trend;
+  if(k==='day'){const r=t.hours.map((v,h)=>[h+'時',v,hv(t,h)]).filter(x=>x[1]>0);trend=card('時間帯別の売上',r.length?bars(r):'<p class="empty">会計するとここに時間帯ごとの売上が出ます</p>')}
+  else if(k==='year'){const mm=Array(12).fill(0);dkeys.forEach(d=>{mm[+d.slice(5,7)-1]+=dm[d].total});const r=mm.map((v,i)=>[(i+1)+'月',v]).filter(x=>x[1]>0);trend=card('月ごとの売上',r.length?bars(r):'<p class="empty">この年の売上はまだありません</p>')}
+  else{const r=dkeys.map(d=>[dlabel(d),dm[d].total,yen(dm[d].total)+(wxName(wxOf(d))?'・'+wxName(wxOf(d)):'')]);trend=card('日ごとの売上',r.length?bars(r,76):'<p class="empty">この期間の売上はまだありません</p>')}
+  const rank=[...t.items].sort((a,b)=>b.q-a.q).slice(0,k==='day'?15:30);
+  const rankCard=card('よく出た商品',rank.length?`<div class="tblwrap"><table><tr><th>商品</th><th class="r">数量</th><th class="r">金額</th></tr>${rank.map(i=>`<tr><td style="white-space:normal">${esc(i.n)}</td><td class="r num">${i.q}</td><td class="r num">${yen(i.a)}</td></tr>`).join('')}</table></div>`:'<p class="empty">まだ会計がありません</p>');
+  /* 期間の切り口（週・月・年） */
+  let cuts='';
+  if(k!=='day'&&dkeys.length){
+    const hr=t.hours.map((v,h)=>[h+'時',v,hv(t,h)]).filter(x=>x[1]>0);
+    const grp=(keyOf,order)=>{const g={};dkeys.forEach(d=>{const key=keyOf(d),e=g[key]||(g[key]={n:0,total:0,count:0});e.n++;e.total+=dm[d].total;e.count+=dm[d].count});
+      return Object.keys(g).sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99)).map(key=>[key,g[key].total/g[key].n,yen(g[key].total/g[key].n)+'（'+g[key].n+'日）'])};
+    const dw=grp(d=>DOW[dparse(d).getDay()],['月','火','水','木','金','土','日']);
+    const wr=grp(d=>wxName(wxOf(d))||'記録なし',[...WX,'記録なし']);
+    const TB=['9℃以下','10〜19℃','20〜24℃','25〜29℃','30℃以上','記録なし'];
+    const tr=grp(d=>{const x=wxOf(d);if(!x||x.hi==null)return '記録なし';const h=x.hi;return h<10?TB[0]:h<20?TB[1]:h<25?TB[2]:h<30?TB[3]:TB[4]},TB);
+    cuts=`<div class="cols" style="margin-top:16px">${card('時間帯別の売上',hr.length?bars(hr):'<p class="empty">—</p>')}${card('曜日別（1日あたりの平均）',bars(dw))}</div>
+      <div class="cols" style="margin-top:16px">${card('天気別（1日あたりの平均）',bars(wr,64),'wx')}${card('最高気温別（1日あたりの平均）',bars(tr,76))}</div>`;
+  }
+  /* お客様の記録 */
+  const ids=[...new Set(t.tg.map(e=>e.t))].sort((a,b)=>(S.tags.findIndex(x=>x.id===a)+1||99)-(S.tags.findIndex(x=>x.id===b)+1||99));
+  const tagCards=ids.map(id=>{const es=t.tg.filter(e=>e.t===id),def=S.tags.find(x=>x.id===id),name=def?def.name:es[0].tn,num=es.find(e=>e.o==='');
+    if(num)return card(esc(name),`<div class="tblwrap"><table><tr><th>合計</th><th class="r">記録した会計</th><th class="r">1会計あたり</th><th class="r">1あたりの売上</th></tr><tr><td class="num">${num.n}</td><td class="r num">${num.c}件</td><td class="r num">${(num.n/Math.max(1,num.c)).toFixed(1)}</td><td class="r num">${yen(num.a/Math.max(1,num.n))}</td></tr></table></div>`);
+    const ord=def?def.opts:[],rows=es.sort((a,b)=>(ord.indexOf(a.o)+1||99)-(ord.indexOf(b.o)+1||99)),sum=rows.reduce((a,e)=>a+e.c,0);
+    return card(esc(name),`<div class="tblwrap"><table><tr><th>内容</th><th class="r">会計数</th><th class="r">割合</th><th class="r">売上</th><th class="r">会計単価</th></tr>${rows.map(e=>`<tr><td>${esc(e.o)}</td><td class="r num">${e.c}</td><td class="r num">${Math.round(e.c/Math.max(1,sum)*100)}%</td><td class="r num">${yen(e.a)}</td><td class="r num">${yen(e.a/Math.max(1,e.c))}</td></tr>`).join('')}</table></div>`)}).join('');
+  const wxT=wxOf(R.from);
+  main.innerHTML=`<div class="view"><h1 class="h1">売上 <small class="num" style="color:var(--muted);font-size:14px">${esc(R.label)}</small></h1>
+    <div class="pernav"><div class="seg">${[['day','日'],['week','週'],['month','月'],['year','年']].map(([v,n])=>`<button class="${k===v?'on':''}" data-a="per" data-k="${v}">${n}</button>`).join('')}</div>
+      <button class="btn" data-a="pmove" data-d="1">‹ 前</button><button class="btn" data-a="pmove" data-d="-1" ${S.per.off?'':'disabled'}>次 ›</button>${S.per.off?'<button class="btn" data-a="pmove" data-d="0">今に戻る</button>':''}${HP('period')}</div>
+    ${k==='day'?`<div class="wxline"><span>天気：<b>${esc(wxName(wxT)||'記録なし')}</b>${wxT&&wxT.mw?'（手入力）':wxT&&wxT.aw?'（自動）':''}${wxT&&wxT.hi!=null?`　最高 ${wxT.hi}℃／最低 ${wxT.lo}℃／雨 ${wxT.rain||0}mm`:''}${wxT&&wxT.ow?'　開店時：'+esc(wxT.ow):''}</span>${BOSS?`<button class="mini" data-a="wxpick" data-day="${R.from}">天気を直す</button>`:''}${HP('wx')}</div>`:''}
     <div class="kpis"><div class="kpi main"><span>売上（税込）</span><b class="num">${yen(t.total)}</b></div>
       <div class="kpi"><span>会計数</span><b class="num">${t.count}件</b></div><div class="kpi"><span>会計単価</span><b class="num">${yen(t.count?t.total/t.count:0)}</b></div>
+      ${pax?`<div class="kpi"><span>客数（記録分）</span><b class="num">${pax.n}人</b></div><div class="kpi"><span>客単価</span><b class="num">${yen(pax.a/Math.max(1,pax.n))}</b></div>`:''}
+      ${k!=='day'?`<div class="kpi"><span>営業日数</span><b class="num">${dkeys.length}日</b></div><div class="kpi"><span>1日あたり</span><b class="num">${yen(dkeys.length?t.total/dkeys.length:0)}</b></div>`:''}
       ${METHODS.map(m=>`<div class="kpi"><span>${esc(m.name)}</span><b class="num">${yen((t.pay||{})[m.id])}</b></div>`).join('')}
-      <div class="kpi"><span>未会計の注文</span><b class="num">${open}件</b></div></div>
-    <div class="cols" style="margin-top:16px">
-      <div class="card"><h2 class="h2" style="margin-top:0">時間帯別の売上</h2>${hrs.length?hrs.map(([h,v])=>`<div class="hbar"><span class="num">${h}時</span><span><i style="width:${Math.round(v/maxH*100)}%"></i></span><span class="num">${yen(v)}</span></div>`).join(''):'<p class="empty">会計するとここに時間帯ごとの売上が出ます</p>'}</div>
-      <div class="card"><h2 class="h2" style="margin-top:0">よく出た商品</h2>${rank.length?`<div class="tblwrap"><table><tr><th>商品</th><th class="r">数量</th><th class="r">金額</th></tr>${rank.map(i=>`<tr><td style="white-space:normal">${esc(i.n)}</td><td class="r num">${i.q}</td><td class="r num">${yen(i.a)}</td></tr>`).join('')}</table></div>`:'<p class="empty">まだ会計がありません</p>'}</div>
-    </div>
-    <h2 class="h2">本日の会計履歴（日締め前）</h2>
+      ${isToday?`<div class="kpi"><span>未会計の注文</span><b class="num">${open}件</b></div>`:''}</div>
+    <div class="cols" style="margin-top:16px">${trend}${rankCard}</div>
+    ${cuts}
+    ${tagCards?`<h2 class="h2">お客様の記録 ${HP('tags')}</h2><div class="cols">${tagCards}</div>`:''}
+    ${isToday?`<h2 class="h2">本日の会計履歴（日締め前）</h2>
     <div class="card">${live.length?`<div class="tblwrap"><table><tr><th>No.</th><th>時刻</th><th>席</th><th>支払</th><th class="r">金額</th><th></th></tr>${live.map(s=>`<tr class="${s.void?'void':''}"><td class="num">${s.no}</td><td class="num">${hm(s.at)}</td><td>${esc(s.seat)}</td><td>${esc(METHOD[s.method]||s.method)}</td><td class="r num">${yen(s.total)}</td>
-      <td class="r" style="text-decoration:none;opacity:1"><button class="mini" data-a="rcpt" data-id="${s.id}">明細</button> ${s.void?'':`<button class="mini danger" data-a="voidsale" data-id="${s.id}">取消</button>`}</td></tr>`).join('')}</table></div>`:'<p class="empty">日締め前の会計はありません</p>'}</div>
+      <td class="r" style="text-decoration:none;opacity:1"><button class="mini" data-a="rcpt" data-id="${s.id}">明細</button> ${s.void?'':`<button class="mini" data-a="tagedit" data-id="${s.id}">記録${Object.keys(s.tags||{}).length||Object.keys(s.notes||{}).length?'✓':''}</button> <button class="mini danger" data-a="voidsale" data-id="${s.id}">取消</button>`}</td></tr>`).join('')}</table></div>`:'<p class="empty">日締め前の会計はありません</p>'}</div>
     <h2 class="h2">日締め ${HP('closeday')}</h2>
     <div class="card"><p style="margin:0 0 10px;color:var(--muted);font-size:13px">営業終了後に押してください。会計履歴を日別の集計にまとめ、済んだ伝票を片付けます（未会計の伝票は残ります）。</p>
-      <button class="btn dark" data-a="closeday" ${S.sales.length?'':'disabled'}>日締めをする</button></div>
-    <h2 class="h2">日別の売上（日締め済み）</h2>
-    <div class="card">${past.length?`<div class="tblwrap"><table><tr><th>日付</th><th class="r">売上</th><th class="r">会計数</th>${METHODS.map(m=>`<th class="r">${esc(m.name)}</th>`).join('')}<th class="r">値引き</th></tr>${past.map(d=>`<tr><td class="num">${esc(d.id)}</td><td class="r num">${yen(d.total)}</td><td class="r num">${d.count}</td>${METHODS.map(m=>`<td class="r num">${yen((d.pay||{})[m.id])}</td>`).join('')}<td class="r num">${yen(d.disc)}</td></tr>`).join('')}</table></div>`:'<p class="empty">日締めをすると、ここに日ごとの売上が残ります</p>'}</div></div>`;
+      <button class="btn dark" data-a="closeday" ${S.sales.length?'':'disabled'}>日締めをする</button></div>`:''}
+    ${k!=='day'?`<h2 class="h2">日ごとの一覧</h2>
+    <div class="card">${dkeys.length?`<div class="tblwrap"><table><tr><th>日付</th><th>天気</th><th>気温</th><th class="r">売上</th><th class="r">会計数</th><th class="r">客数</th>${METHODS.map(m=>`<th class="r">${esc(m.name)}</th>`).join('')}<th class="r">値引き</th></tr>${[...dkeys].reverse().map(d=>{const x=dm[d],wx=wxOf(d),px=paxOf(x);return `<tr><td class="num">${dlabel(d)}</td><td>${BOSS?`<button class="mini" data-a="wxpick" data-day="${d}">${esc(wxName(wx)||'入れる')}</button>`:esc(wxName(wx)||'—')}</td><td class="num">${esc(wxTemp(wx)||'—')}</td><td class="r num">${yen(x.total)}</td><td class="r num">${x.count}</td><td class="r num">${px?px.n:'—'}</td>${METHODS.map(m=>`<td class="r num">${yen((x.pay||{})[m.id])}</td>`).join('')}<td class="r num">${yen(x.disc)}</td></tr>`}).join('')}</table></div>`:'<p class="empty">この期間の売上はまだありません</p>'}</div>`:'<p class="hint" style="margin-top:16px">上の「週」「月」「年」を押すと、期間ごとの集計と日ごとの一覧が出ます。</p>'}
+    ${BOSS?`<h2 class="h2">データを取り出す ${HP('csv')}</h2><div class="card"><p style="margin:0 0 10px;color:var(--muted);font-size:13px">いま表示している期間（${esc(R.label)}）を、表計算ソフトで開ける形で保存します。</p>
+      <div class="row"><button class="btn" data-a="csvdays">日ごとの集計を保存</button><button class="btn" data-a="csvsales">会計1件ずつの明細を保存</button></div></div>`:''}</div>`;
+  if(keep){main.scrollTop=keep[0];if(se)se.scrollTop=keep[1];if(main.firstElementChild)main.firstElementChild.scrollTop=keep[2]}
 }
 async function closeDay(){
   const byDay={};S.sales.forEach(s=>(byDay[s.day]=byDay[s.day]||[]).push(s));
@@ -339,12 +439,87 @@ async function closeDay(){
   const prog=()=>showModal(`<div class="sheet"><header><h2>日締め処理中…</h2></header><div class="body"><p class="num">${n} / ${all} 件を整理しました。画面を閉じずにお待ちください。</p></div></div>`);
   prog();
   for(const day of Object.keys(byDay)){
-    const ex=S.days.find(d=>d.id===day),sum=mergeSum(ex?{...ex}:null,summarize(byDay[day]));delete sum.id;
+    const ex=S.days.find(d=>d.id===day),sum=mergeSum(ex?{...ex}:null,summarize(byDay[day]));
     if(!await w(Store.set('days',day,sum))){closeModal();return}
   }
-  for(const s of sales){await w(Store.del('sales',s.id));n++;if(n%5===0)prog()}
+  /* 会計1件ずつの中身は「記録の倉庫」に移してから、レジの一覧から片付ける */
+  for(const s of sales){const {id,orderIds,...rest}=s;
+    if(!await w(Store.set('log',s.day+'/'+s.id,rest))){closeModal();return}
+    await w(Store.del('sales',s.id));n++;if(n%5===0)prog()}
   for(const o of paid){await w(Store.del('orders',o.id));n++;if(n%5===0)prog()}
   closeModal();toast('日締めが完了しました');
+}
+/* ---------- 天気（気象庁の観測データを自動で記録。手で直すこともできる） ---------- */
+async function fetchWx(day){
+  const J='https://www.jma.go.jp/bosai/',ymd=day.replace(/-/g,''),isT=day===dayOf(Date.now()),maxH=isT?new Date().getHours():23,ps=[];
+  for(let h=0;h<=maxH;h+=3)ps.push(fetch(J+'amedas/data/point/'+WXC.amedas+'/'+ymd+'_'+p2(h)+'.json',{cache:'no-store'}).then(r=>r.ok?r.json():{}).catch(()=>({})));
+  const rec=Object.assign({},...(await Promise.all(ps)));
+  let hi=null,lo=null,rain=0,sun=0,sunN=0,n=0;
+  for(const key in rec){if(key.slice(0,8)!==ymd)continue;const r=rec[key],v=x=>Array.isArray(r[x])&&typeof r[x][0]==='number'?r[x][0]:null;n++;
+    const tp=v('temp');if(tp!=null){hi=hi==null?tp:Math.max(hi,tp);lo=lo==null?tp:Math.min(lo,tp)}
+    const p=v('precipitation10m');if(p!=null)rain+=p;
+    const hh=+key.slice(8,10),s=v('sun10m');if(s!=null&&hh>=7&&hh<17){sun+=s;sunN++}}
+  if(!n)return null;
+  rain=Math.round(rain*10)/10;let aw='';
+  if(rain>=1)aw=lo!=null&&lo<=1?'雪':'雨';
+  else if(sunN>=6)aw=sun/(sunN*10)>=.4?'晴れ':'くもり';
+  else if(isT){try{const j=await (await fetch(J+'forecast/data/forecast/'+WXC.office+'.json',{cache:'no-store'})).json(),ts=j[0].timeSeries[0],ar=ts.areas.find(a=>a.area.code===WXC.area)||ts.areas[0];
+    if(String(ts.timeDefines[0]).slice(0,10)===day)aw={1:'晴れ',2:'くもり',3:'雨',4:'雪'}[String(ar.weatherCodes[0])[0]]||''}catch(e){}}
+  const out={rain};if(aw)out.aw=aw;if(hi!=null){out.hi=hi;out.lo=lo}return out;
+}
+/* 開店時に1回だけ「今日の天気は？」と聞く（自動の記録とは別に残す。答えなくても使える） */
+function renderWxAsk(){
+  const el=$('#wxask');if(!el)return;const today=dayOf(Date.now()),cur=wxOf(today);
+  const show=S.wxReady&&(S.role==='register'||BOSS)&&!(cur&&cur.ow)&&ls.get('wxSkip','')!==today;
+  el.hidden=!show;if(!show){el.innerHTML='';return}
+  const html=`<b>今日の天気は？</b><span class="wxa-sub">開店時に1回だけ${cur&&cur.aw?'（自動の記録：'+esc(cur.aw)+'）':''}</span>${WX.map(n=>`<button class="chip" data-a="wxopen" data-w="${n}">${n}</button>`).join('')}<button class="mini" data-a="wxskip">あとで</button>${HP('wx')}`;
+  if(el.dataset.h!==html){el.innerHTML=html;el.dataset.h=html}
+}
+let wxBusy=false;
+async function autoWx(){
+  if(wxBusy||Store.mode!=='fb'||!Store.online||!WXC||!WXC.amedas||!(S.role==='register'||BOSS))return;wxBusy=true;
+  const put=(day,r,cur)=>{const v={...r,at:Date.now()};return cur?Store.update('wx',day,v):Store.set('wx',day,v)};
+  try{const today=dayOf(Date.now()),cur=wxOf(today);
+    if(!cur||!cur.at||Date.now()-cur.at>50*60000){const r=await fetchWx(today);if(r)await put(today,r,cur)}
+    /* 過ぎた営業日は、1日分そろった数字で1回だけ確定させる（気象庁が持っているのは直近10日ほど） */
+    const lim=new Date();lim.setDate(lim.getDate()-9);const from=dstr(lim);
+    for(const d of S.days){if(d.id<from||d.id>=today)continue;const c=wxOf(d.id);if(c&&c.fin)continue;const r=await fetchWx(d.id);if(r)await put(d.id,{...r,fin:true},c)}
+  }catch(e){}
+  wxBusy=false;
+}
+/* ---------- データの取り出し（CSV） ---------- */
+function dl(name,rows){
+  const cell=c=>{c=c==null?'':String(c);if(/^[=+\-@]/.test(c)&&isNaN(+c))c="'"+c;return /[",\r\n]/.test(c)?'"'+c.replace(/"/g,'""')+'"':c};
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(cell).join(',')).join('\r\n')],{type:'text/csv'}));
+  a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);
+}
+async function loadLog(days){
+  if(Store.mode==='fb'){const out=[];
+    await Promise.all(days.map(async d=>{const s=await Store.root.child('log/'+d).once('value'),v=s.val()||{};for(const id in v)out.push({...v[id],day:d,id})}));return out}
+  const m=Store._load('log');return Object.keys(m).filter(key=>days.includes(key.split('/')[0])).map(key=>({...m[key],day:key.split('/')[0],id:key.split('/')[1]}));
+}
+function csvDays(){
+  const R=periodRange(),dm=daySums(R.from,R.to),dkeys=Object.keys(dm).sort();if(!dkeys.length){toast('この期間の売上はまだありません');return}
+  const cols=[];dkeys.forEach(d=>dm[d].tg.forEach(e=>{const key=e.t+'|'+e.o;if(!cols.find(c=>c.key===key))cols.push({key,name:e.tn+(e.o?'：'+e.o:'')})}));
+  const rows=[['日付','曜日','天気','開店時の天気','最高気温','最低気温','雨量mm','売上','会計数','会計単価',...METHODS.map(m=>m.name),'値引き',...cols.map(c=>c.name),...Array.from({length:24},(_,h)=>h+'時')]];
+  dkeys.forEach(d=>{const x=dm[d],wx=wxOf(d)||{};rows.push([d,DOW[dparse(d).getDay()],wxName(wx),wx.ow||'',wx.hi==null?'':wx.hi,wx.lo==null?'':wx.lo,wx.rain==null?'':wx.rain,x.total,x.count,x.count?Math.round(x.total/x.count):0,
+    ...METHODS.map(m=>(x.pay||{})[m.id]||0),x.disc,...cols.map(c=>{const e=x.tg.find(z=>z.t+'|'+z.o===c.key);return e?(e.o===''?e.n:e.c):0}),...x.hours])});
+  dl(SHOP_ID+'_days_'+R.from+'_'+R.to+'.csv',rows);
+}
+async function csvSales(){
+  const R=periodRange(),days=S.days.filter(d=>d.id>=R.from&&d.id<=R.to).map(d=>d.id);
+  toast('明細を集めています…');let list;
+  try{list=await loadLog(days)}catch(e){toast('明細を読み込めませんでした。通信を確認してください','err');return}
+  S.sales.forEach(s=>{if(s.day>=R.from&&s.day<=R.to)list.push(s)});
+  if(!list.length){toast('この期間の明細はありません（明細が残るのは、この機能が入った後の日締めからです）');return}
+  list.sort((a,b)=>a.at-b.at);
+  const tids=[],nids=[];list.forEach(s=>{for(const id in s.tags||{})if(!tids.includes(id))tids.push(id);for(const id in s.notes||{})if(!nids.includes(id))nids.push(id)});
+  const nm=id=>(S.tags.find(t=>t.id===id)||{}).name||id;
+  const rows=[['日付','時刻','曜日','天気','No.','席','合計','値引き','支払','担当','取消',...tids.map(nm),...nids.map(nm),'品数','商品']];
+  list.forEach(s=>rows.push([s.day,hm(s.at),DOW[dparse(s.day).getDay()],wxName(wxOf(s.day)),s.no,s.seat,s.total,s.discount||0,METHOD[s.method]||s.method,s.by||'',s.void?'取消':'',
+    ...tids.map(id=>{const v=(s.tags||{})[id];return v==null?'':[].concat(v).join('・')}),...nids.map(id=>(s.notes||{})[id]||''),
+    (s.lines||[]).reduce((a,l)=>a+l.qty,0),(s.lines||[]).map(l=>l.name+((l.mods||[]).length?'('+l.mods.join('・')+')':'')+'×'+l.qty).join(' / ')]));
+  dl(SHOP_ID+'_sales_'+R.from+'_'+R.to+'.csv',rows);
 }
 
 /* ---------- 設定 ---------- */
@@ -373,6 +548,11 @@ function renderSettings(main,force){
       <div class="lgrid"><label>いまのパスワード<input class="inp" id="mpCur" type="password" autocomplete="current-password"></label>
       <label>新しいパスワード（6文字以上）<input class="inp" id="mpNew" type="password" autocomplete="new-password"></label></div>
       <p class="lerr" id="mpMsg"></p><div class="row"><button class="btn dark" data-a="changemypass">パスワードを変える</button></div></div>`:''}
+    ${BOSS?`<div class="card"><h3>会計のときの記録項目 ${HP('tagset')}</h3><p>会計の画面に出す「お客様の記録」です。使うものにチェックを入れます。押さなくても会計はできます。選択肢は「、」で区切って書きます。名前を空にすると、その項目は消えます。</p>
+      ${S.tags.map(t=>`<div class="trow"><label class="tck"><input type="checkbox" id="tgon_${t.id}" ${t.on?'checked':''}>使う</label><input class="inp" id="tgn_${t.id}" value="${esc(t.name)}" maxlength="12" aria-label="項目の名前"><span class="tty">${TAGTYPE[t.type]||''}</span>${t.type==='one'||t.type==='multi'?`<input class="inp" id="tgo_${t.id}" value="${esc(t.opts.join('、'))}" aria-label="選択肢">`:'<span></span>'}</div>`).join('')}
+      <h2 class="h2" style="margin:18px 0 6px">新しい項目を追加</h2>
+      <div class="row"><input class="inp" id="tgNewName" placeholder="項目の名前（例：席の希望）" maxlength="12"><select class="inp" id="tgNewType">${Object.entries(TAGTYPE).map(([v,n])=>`<option value="${v}">${n}</option>`).join('')}</select><input class="inp" id="tgNewOpts" placeholder="選択肢（例：カウンター、テーブル）" style="flex:1;min-width:180px"></div>
+      <div class="row" style="margin-top:12px"><button class="btn dark" data-a="savetags">記録項目を保存</button><button class="btn" data-a="resettags">初期の項目に戻す</button></div></div>`:''}
     ${reg&&BOSS?`<div class="card"><h3>席の設定 ${HP('seats')}</h3><p>1行に1つ、席やテーブルの名前を書きます。</p>
       <textarea class="inp" id="seatText" rows="6">${esc(S.seats.join('\n'))}</textarea><div class="row" style="margin-top:8px"><button class="btn dark" data-a="saveseats">席を保存</button></div></div>
     <div class="card"><h3>メニューの編集 ${HP('menuedit')}</h3><p>名前と価格（税込）を直して「メニューを保存」を押すと全端末に反映されます。名前を空にするとその品は消えます。</p>
@@ -389,16 +569,16 @@ async function showStaffNow(){const el=$('#staffNow');if(!el)return;try{const l=
 function qrSvg(t){try{const q=qrcode(0,'M');q.addData(t);q.make();return q.createSvgTag({cellSize:4,margin:2})}catch(e){return ''}}
 /* ---------- 描画・モーダル ---------- */
 function render(force){
-  renderBar();
+  renderBar();renderWxAsk();
   const main=$('#main');
-  if(S.role!=='register'&&S.tab==='sales')S.tab='order';
+  if(S.role!=='register'&&!BOSS&&S.tab==='sales')S.tab='order';
   if(S.tab==='order')renderOrder(main);
   else if(S.tab==='feed')renderFeed(main);
   else if(S.tab==='sales')renderSales(main);
   else renderSettings(main,force);
 }
 function showModal(html){const m=$('#modal');m.innerHTML=html;m.hidden=false}
-function closeModal(){const m=$('#modal');m.hidden=true;m.innerHTML='';X=null;P=null}
+function closeModal(){const m=$('#modal');m.hidden=true;m.innerHTML='';X=null;P=null;E=null}
 function confirmBox(title,msg,okLabel,fn){
   showModal(`<div class="sheet"><header><h2>${esc(title)}</h2></header><div class="body"><p>${esc(msg)}</p></div><footer><button class="btn" data-a="close">やめる</button><button class="btn pri" data-a="cok">${esc(okLabel)}</button></footer></div>`);
   confirmFn=fn;
@@ -474,6 +654,37 @@ const A={
       toast('会計を取り消しました')})},
   closeday(){const open=S.orders.filter(o=>!o.paid).length;
     confirmBox('日締め','会計履歴を日別の集計にまとめます。'+(open?'未会計の注文が'+open+'件残っています（そのまま残ります）。':'')+'実行しますか？','日締めをする',closeDay)},
+  per(d){S.per={k:d.k,off:0};render()},
+  pmove(d){S.per.off=d.d==='0'?0:Math.max(0,S.per.off+ +d.d);render()},
+  tgnum(d){const o=TG();if(!o)return;const c=o.tags[d.t],n=(c==null?0:c)+ +d.d;if(n<=0)delete o.tags[d.t];else o.tags[d.t]=Math.min(99,n);tgRedraw()},
+  tgopt(d){const o=TG(),t=S.tags.find(x=>x.id===d.t);if(!o||!t)return;const v=t.opts[+d.o],c=o.tags[d.t];
+    if(t.type==='multi'){const a=[].concat(c==null?[]:c),n=a.includes(v)?a.filter(x=>x!==v):[...a,v];if(n.length)o.tags[d.t]=n;else delete o.tags[d.t]}
+    else if(c===v)delete o.tags[d.t];else o.tags[d.t]=v;
+    tgRedraw()},
+  tagedit(d){const s=S.sales.find(x=>x.id===d.id);if(!s)return;E={id:s.id,tags:JSON.parse(JSON.stringify(s.tags||{})),notes:{...(s.notes||{})}};renderTagEdit()},
+  tgsave(){const e=E;if(!e)return;closeModal();w(Store.update('sales',e.id,{tags:e.tags,notes:cleanNotes(e.notes)}),'記録を保存しました')},
+  wxpick(d){const x=wxOf(d.day);
+    showModal(`<div class="sheet"><header><h2>天気を直す　${esc(d.day)}</h2>${HP('wx')}<button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body">
+      <p class="hint" style="margin:0 0 12px">${x&&x.ow?'開店時の記録：'+esc(x.ow)+'　／　':''}自動の記録：${esc((x&&x.aw)||'なし')}${x&&x.hi!=null?`（最高 ${x.hi}℃／最低 ${x.lo}℃／雨 ${x.rain||0}mm）`:''}</p>
+      <div class="chips">${WX.map(n=>`<button class="chip ${x&&x.mw===n?'on':''}" data-a="wxset" data-day="${d.day}" data-w="${n}">${n}</button>`).join('')}</div></div>
+      <footer>${x&&x.mw?`<button class="btn" data-a="wxset" data-day="${d.day}" data-w="">自動の記録に戻す</button>`:''}<button class="btn pri" data-a="close">閉じる</button></footer></div>`)},
+  wxopen(d){const day=dayOf(Date.now()),cur=wxOf(day),v={ow:d.w,oat:Date.now()};w(cur?Store.update('wx',day,v):Store.set('wx',day,v),'開店時の天気を「'+d.w+'」で記録しました')},
+  wxskip(){ls.set('wxSkip',dayOf(Date.now()));renderWxAsk()},
+  wxset(d){const cur=wxOf(d.day),mw=d.w||null;closeModal();w(cur?Store.update('wx',d.day,{mw}):Store.set('wx',d.day,{mw}),mw?'天気を「'+mw+'」にしました':'自動の記録に戻しました')},
+  csvdays(){csvDays()},
+  csvsales(d,btn){btn.disabled=true;csvSales().finally(()=>{btn.disabled=false})},
+  savetags(){
+    const split=s=>[...new Set(String(s).split(/[、,，\n]/).map(x=>x.trim().slice(0,16)).filter(Boolean))],list=[];let bad='';
+    S.tags.forEach(t=>{const n=$('#tgn_'+t.id);if(!n)return list.push(t);const name=n.value.trim().slice(0,12);if(!name)return;
+      const o=$('#tgo_'+t.id),opts=o?split(o.value):[];if(o&&!opts.length){bad=name;return}
+      list.push({id:t.id,name,type:t.type,opts,on:$('#tgon_'+t.id).checked})});
+    const nn=$('#tgNewName').value.trim().slice(0,12);
+    if(nn){const type=$('#tgNewType').value,opts=type==='one'||type==='multi'?split($('#tgNewOpts').value):[];
+      if((type==='one'||type==='multi')&&!opts.length)bad=nn;else list.push({id:'c'+uid(),name:nn,type,opts,on:true})}
+    if(bad){toast('「'+bad+'」の選択肢を1つ以上入れてください','err');return}
+    if(!list.length){toast('項目を全部消すことはできません。使わない時は「使う」のチェックを外してください','err');return}
+    w(Store.set('config','tags',{list}),'記録項目を保存しました').then(()=>render(true))},
+  resettags(){confirmBox('初期の項目に戻す','記録項目を最初の状態に戻します。これまでに記録した内容は消えません。','戻す',()=>w(Store.del('config','tags'),'初期の項目に戻しました').then(()=>render(true)))},
   logout(){confirmBox('ログアウト','この端末からログアウトします。未送信の注文は残ります。','ログアウト',()=>ME.auth.signOut())},
   async savestafflogin(d,btn){const m=$('#slMsg');m.textContent='作成中…';btn.disabled=true;
     try{const r=await PA.replaceLogin(DB,SHOP_ID,'staff',$('#slId').value,$('#slPw').value,$('#slCur').value);
@@ -504,7 +715,7 @@ document.addEventListener('click',e=>{
   const b=e.target.closest('[data-a]');if(!b||b.disabled)return;
   const f=A[b.dataset.a];if(f)f(b.dataset,b);
 });
-document.addEventListener('input',e=>{if(e.target.dataset.i==='note'&&X)X.note=e.target.value});
+document.addEventListener('input',e=>{if(e.target.dataset.i==='note'&&X)X.note=e.target.value;if(e.target.dataset.i==='tgtext'){const o=TG();if(o)o.notes[e.target.dataset.t]=e.target.value}});
 document.addEventListener('pointerdown',()=>{
   try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume()}catch(e){}
   try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}
@@ -520,9 +731,12 @@ Store.init().then(()=>{
   Store.sub('orders',a=>{detectNew(a);S.orders=a;render()});
   Store.sub('sales',a=>{S.sales=a;render()});
   Store.sub('days',a=>{S.days=a;render()});
+  Store.sub('wx',a=>{S.wx=a;S.wxReady=true;render()});
+  setTimeout(autoWx,8000);setInterval(autoWx,30*60000);
   Store.sub('config',a=>{
     const g=id=>a.find(x=>x.id===id);
-    const mn=g('menu'),st=g('seats'),sd=g('sold');
+    const mn=g('menu'),st=g('seats'),sd=g('sold'),tg=g('tags');
+    S.tags=tg&&Array.isArray(tg.list)&&tg.list.length?tg.list.map(t=>({...t,opts:t.opts||[],on:!!t.on})):DEFAULT_TAGS;
     S.menu=mn&&Array.isArray(mn.items)&&mn.items.length?mn.items.map(m=>({...m,mods:m.mods||[]})):DEFAULT_MENU;
     S.seats=st&&Array.isArray(st.list)&&st.list.length?st.list:DEFAULT_SEATS;
     S.sold=sd&&Array.isArray(sd.ids)?sd.ids:[];
