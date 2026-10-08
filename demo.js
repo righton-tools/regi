@@ -14,6 +14,7 @@ const wipe=()=>{try{Object.keys(localStorage).filter(k=>k.startsWith('pos.demo-'
 wipe();window.addEventListener('pagehide',wipe);
 
 /* ---------- 見本のお店（業態ごと） ---------- */
+const FEE={card:3.24,qr:3.24};
 const PAY=[{id:'cash',name:'現金',cash:true},{id:'card',name:'カード'},{id:'qr',name:'QR決済'}];
 const col=(accent,soft,bar,dAccent,dSoft,dBar,ink)=>({accent,accentInk:ink||'#ffffff',accentSoft:soft,bar,dark:{accent:dAccent,accentInk:'#14100f',accentSoft:dSoft,bar:dBar}});
 const seats=(...a)=>a.flatMap(([n,c])=>Array.from({length:c},(_,i)=>n+(i+1)));
@@ -182,9 +183,9 @@ function makeSale(R,t,items,at,noTags){
   return s;
 }
 function summarize(sales){
-  const s={total:0,count:0,pay:{},disc:0,items:[],hours:Array(24).fill(0),hc:Array(24).fill(0),tg:[],gp:0,gps:0,toA:0,tx:[]};const im={},tm={},xm={};
+  const s={total:0,count:0,pay:{},disc:0,items:[],hours:Array(24).fill(0),hc:Array(24).fill(0),tg:[],gp:0,gps:0,toA:0,fee:0,fp:{},tx:[]};const im={},tm={},xm={};
   const tg=(t,tn,o,a,n)=>{const k=t+'|'+o,x=tm[k]||(tm[k]={t,tn,o,c:0,a:0,n:0});x.c++;x.a+=a;x.n+=n};
-  sales.forEach(x=>{const h=new Date(x.at).getHours();s.total+=x.total;s.count++;x.pays.forEach(p=>{s.pay[p.m]=(s.pay[p.m]||0)+p.amt});s.hours[h]+=x.total;s.hc[h]++;
+  sales.forEach(x=>{const h=new Date(x.at).getHours();s.total+=x.total;s.count++;x.pays.forEach(p=>{s.pay[p.m]=(s.pay[p.m]||0)+p.amt;const f=Math.round(p.amt*(FEE[p.m]||0)/100);if(f){s.fee+=f;s.fp[p.m]=(s.fp[p.m]||0)+f}});s.hours[h]+=x.total;s.hc[h]++;
     x.taxes.forEach(t=>{const e=xm[t.r]||(xm[t.r]={r:t.r,amt:0,tax:0});e.amt+=t.amt;e.tax+=t.tax});
     if(x.tags){tg('pax','人数','',x.total,x.tags.pax);tg('sex','性別',x.tags.sex,x.total,0);tg('age','年齢層',x.tags.age,x.total,0)}
     x.lines.forEach(l=>{const e=im[l.name]||(im[l.name]={n:l.name,q:0,a:0,g:0,gq:0});e.q+=l.qty;e.a+=l.unit*l.qty;if(l.to)s.toA+=l.unit*l.qty;
@@ -193,7 +194,7 @@ function summarize(sales){
 }
 function seed(db,t,items,sid){
   const root=db.ref('shops/'+sid),P=t.prof,now=new Date(),hrs=Object.keys(P.hours).map(Number),hw=hrs.map(h=>P.hours[h]);
-  root.child('config/menu').set({items});
+  root.child('config/menu').set({items});root.child('config/fee').set({rates:FEE});
   const days={},wx={},cash={};
   for(let d=60;d>=1;d--){
     const day=new Date(now.getFullYear(),now.getMonth(),now.getDate()-d),key=dstr(day),dow=day.getDay();if(dow===P.off)continue;

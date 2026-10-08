@@ -20,6 +20,7 @@ if(!(ME&&ME.demo))try{localStorage.setItem('pos.brand',JSON.stringify({img:CFG.l
 const PFX='pos.'+SHOP_ID+'.';
 const HP=k=>window.POSHelp?window.POSHelp.btn(k):'';
 const PA=window.POSAuth,BOSS=ME.role==='manager'||ME.role==='master';
+const canSales=()=>S.role==='register'&&BOSS;
 /* ---------- 小道具 ---------- */
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -120,7 +121,7 @@ const S={
   role:ls.get('role',null)||(['staff','register'].includes(QS.get('r'))?QS.get('r'):window.innerWidth>=900?'register':'staff'),
   tab:'order',cat:TABS[0][0],seat:null,soldMode:false,
   staff:ls.get('staff',''),sound:ls.get('sound',true),
-  orders:[],sales:[],days:[],wx:[],cash:[],cashio:[],toMode:{},tax:DEFAULT_TAX,guard:null,link:{sqApp:'',map:{}},tags:DEFAULT_TAGS,per:{k:'day',off:0},menu:DEFAULT_MENU,seats:DEFAULT_SEATS,sold:[],
+  orders:[],sales:[],days:[],wx:[],cash:[],cashio:[],toMode:{},tax:DEFAULT_TAX,guard:null,link:{sqApp:'',map:{}},fee:{},tags:DEFAULT_TAGS,per:{k:'day',off:0},menu:DEFAULT_MENU,seats:DEFAULT_SEATS,sold:[],
   drafts:ls.get('drafts',{}),customMenu:false
 };
 S.seat=S.seats[0];
@@ -161,7 +162,7 @@ function detectNew(arr){
 /* ---------- 画面：上部バー ---------- */
 function renderBar(){
   const nNew=S.orders.filter(o=>o.status==='new').length;
-  const tabs=S.role==='register'?[['order','注文・会計'],['feed','オーダー'],['sales','売上'],['settings','設定']]:BOSS?[['order','注文'],['feed','オーダー'],['sales','売上'],['settings','設定']]:[['order','注文'],['feed','オーダー'],['settings','設定']];
+  const reg=S.role==='register',tabs=[['order',reg?'注文・会計':'注文'],['feed','オーダー']].concat(canSales()?[['sales','売上']]:[],[['settings','設定']]);
   $('#tabs').innerHTML=tabs.map(([k,n])=>`<button class="tab ${S.tab===k?'on':''}" data-a="tab" data-t="${k}">${n}${k==='feed'&&nNew?`<span class="badge num">${nNew}</span>`:''}</button>`).join('');
   const live=Store.mode==='db'||(Store.mode==='fb'&&Store.online);
   const s=$('#sync');s.className='pill '+(live?'live':Store.mode==='wait'?'':'local');
@@ -266,6 +267,7 @@ function commitItem(){
 /* ---------- 会計 ---------- */
 let P=null,RCPT=null,PIN=null;
 const salePays=s=>s.pays&&s.pays.length?s.pays:[{m:s.method,amt:s.total,recv:s.received,chg:s.change}];
+const feeRate=m=>+((S.fee||{})[m])||0,payFee=p=>p.fee||0,feeOn=()=>METHODS.some(m=>feeRate(m.id)>0);
 const payName=s=>{const ps=salePays(s);return ps.length>1?'併用':(METHOD[ps[0].m]||ps[0].m||'')};
 const saleTaxes=s=>s.taxes&&s.taxes.length?s.taxes:[{r:s.taxRate==null?S.tax.std:s.taxRate,amt:s.total,tax:s.tax||0}];
 const lkey=l=>[l.name,l.unit,(l.mods||[]).join(','),l.note||'',l.to?1:0,l.r==null?'':l.r,l.c||0].join('|');
@@ -361,7 +363,7 @@ async function confirmPay(){
   const id=uid();
   const lines=C.lines.map(l=>({name:l.name,unit:l.unit,qty:l.qty,mods:l.mods,note:l.note,r:l.r,to:l.to,c:l.c}));
   const parts=[];C.lines.forEach(l=>{let q=l.qty;l.srcs.forEach(s=>{if(q<=0)return;const t=Math.min(q,s.rem);parts.push({oid:s.oid,k:s.k,q:t});q-=t})});
-  const taxes=taxBreak(lines,C.disc),pays=P.pays.length?P.pays:[{m:P.method,amt:0}];
+  const taxes=taxBreak(lines,C.disc),pays=(P.pays.length?P.pays:[{m:P.method,amt:0}]).map(p=>{const f=Math.round((p.amt||0)*feeRate(p.m)/100);return f>0?{...p,fee:f}:p});
   const sale={no,at:now,day,seat:P.seat,lines,subtotal:C.sub,discount:C.disc,total:C.total,taxes,tax:taxes.reduce((a,t)=>a+t.tax,0),taxRate:Math.max(0,...taxes.map(t=>t.r)),
     method:pays.length===1?pays[0].m:'mixed',pays,received:pays.reduce((a,p)=>a+(p.recv==null?p.amt:p.recv),0),change:pays.reduce((a,p)=>a+(p.chg||0),0),
     orderIds:[...new Set(parts.map(p=>p.oid))],parts,by:who(),void:false,tags:P.tags,notes:cleanNotes(P.notes)};
@@ -472,12 +474,12 @@ function renderFeed(main){
 function addTg(map,e){const k=e.t+'|'+e.o,x=map[k]||(map[k]={t:e.t,tn:e.tn||e.t,o:e.o,c:0,a:0,n:0});x.c+=e.c||0;x.a+=e.a||0;x.n+=e.n||0;if(e.tn)x.tn=e.tn}
 const norm=d=>({total:d.total||0,count:d.count||0,pay:d.pay||{},disc:d.disc||0,items:d.items||[],
   hours:Array.from({length:24},(_,h)=>(d.hours||[])[h]||0),hc:Array.from({length:24},(_,h)=>(d.hc||[])[h]||0),tg:(d.tg||[]).map(e=>({...e,o:e.o||''})),
-  gp:d.gp||0,gps:d.gps||0,toA:d.toA||0,tx:(d.tx||[]).map(t=>({r:t.r,amt:t.amt||0,tax:t.tax||0}))});
+  gp:d.gp||0,gps:d.gps||0,toA:d.toA||0,fee:d.fee||0,fp:d.fp||{},tx:(d.tx||[]).map(t=>({r:t.r,amt:t.amt||0,tax:t.tax||0}))});
 const addTx=(map,t)=>{const x=map[t.r]||(map[t.r]={r:t.r,amt:0,tax:0});x.amt+=t.amt;x.tax+=t.tax};
 function summarize(sales){
-  const s={total:0,count:0,pay:{},disc:0,items:[],hours:Array(24).fill(0),hc:Array(24).fill(0),tg:[],gp:0,gps:0,toA:0,tx:[]};const im={},tm={},xm={};
+  const s={total:0,count:0,pay:{},disc:0,items:[],hours:Array(24).fill(0),hc:Array(24).fill(0),tg:[],gp:0,gps:0,toA:0,fee:0,fp:{},tx:[]};const im={},tm={},xm={};
   sales.forEach(x=>{if(x.void)return;const h=new Date(x.at).getHours();
-    s.total+=x.total;s.count++;salePays(x).forEach(p=>{s.pay[p.m]=(s.pay[p.m]||0)+p.amt});s.disc+=x.discount||0;s.hours[h]+=x.total;s.hc[h]++;
+    s.total+=x.total;s.count++;salePays(x).forEach(p=>{s.pay[p.m]=(s.pay[p.m]||0)+p.amt;const f=payFee(p);if(f){s.fee+=f;s.fp[p.m]=(s.fp[p.m]||0)+f}});s.disc+=x.discount||0;s.hours[h]+=x.total;s.hc[h]++;
     saleTaxes(x).forEach(t=>addTx(xm,t));
     const tv=x.tags||{};for(const id in tv){const t=S.tags.find(z=>z.id===id),tn=t?t.name:id,v=tv[id];
       if(typeof v==='number')addTg(tm,{t:id,tn,o:'',c:1,a:x.total,n:v});
@@ -488,11 +490,11 @@ function summarize(sales){
 }
 function mergeSum(a,b){
   b=norm(b);if(!a)return b;a=norm(a);
-  const im={},tm={},xm={},pay={...a.pay};for(const k in b.pay)pay[k]=(pay[k]||0)+b.pay[k];
+  const im={},tm={},xm={},pay={...a.pay},fp={...a.fp};for(const k in b.pay)pay[k]=(pay[k]||0)+b.pay[k];for(const k in b.fp)fp[k]=(fp[k]||0)+b.fp[k];
   [...a.items,...b.items].forEach(i=>{const e=im[i.n]||(im[i.n]={n:i.n,q:0,a:0,g:0,gq:0});e.q+=i.q;e.a+=i.a;e.g+=i.g||0;e.gq+=i.gq||0});
   [...a.tg,...b.tg].forEach(e=>addTg(tm,e));[...a.tx,...b.tx].forEach(t=>addTx(xm,t));
   return {total:a.total+b.total,count:a.count+b.count,pay,disc:a.disc+b.disc,items:Object.values(im),
-    hours:a.hours.map((v,h)=>v+b.hours[h]),hc:a.hc.map((v,h)=>v+b.hc[h]),tg:Object.values(tm),gp:a.gp+b.gp,gps:a.gps+b.gps,toA:a.toA+b.toA,tx:Object.values(xm)};
+    hours:a.hours.map((v,h)=>v+b.hours[h]),hc:a.hc.map((v,h)=>v+b.hc[h]),tg:Object.values(tm),gp:a.gp+b.gp,gps:a.gps+b.gps,toA:a.toA+b.toA,fee:a.fee+b.fee,fp,tx:Object.values(xm)};
 }
 function periodRange(){
   const k=S.per.k,o=S.per.off,n=new Date();n.setHours(0,0,0,0);let a,b,label;
@@ -563,7 +565,8 @@ function renderSales(main){
       ${hasG?`<div class="kpi"><span>粗利（原価を入れた品）</span><b class="num">${yen(t.gp)}</b></div><div class="kpi"><span>粗利率</span><b class="num">${Math.round(t.gp/Math.max(1,t.gps)*100)}%</b></div>`:''}
       ${t.toA?`<div class="kpi"><span>うち持ち帰り</span><b class="num">${yen(t.toA)}</b></div>`:''}
       ${k!=='day'?`<div class="kpi"><span>営業日数</span><b class="num">${dkeys.length}日</b></div><div class="kpi"><span>1日あたり</span><b class="num">${yen(dkeys.length?t.total/dkeys.length:0)}</b></div>`:''}
-      ${METHODS.map(m=>`<div class="kpi"><span>${esc(m.name)}</span><b class="num">${yen((t.pay||{})[m.id])}</b></div>`).join('')}
+      ${METHODS.map(m=>`<div class="kpi"><span>${esc(m.name)}</span><b class="num">${yen((t.pay||{})[m.id])}</b>${(t.fp||{})[m.id]?`<small class="fee num">手数料 −${yen(t.fp[m.id])}</small>`:''}</div>`).join('')}
+      ${t.fee||feeOn()?`<div class="kpi"><span>決済手数料（計算）${HP('fee')}</span><b class="num">−${yen(t.fee)}</b></div><div class="kpi"><span>手数料を引いた売上</span><b class="num">${yen(t.total-t.fee)}</b></div>`:''}
       ${isToday?`<div class="kpi"><span>未会計の注文</span><b class="num">${open}件</b></div>`:''}</div>
     <div class="cols" style="margin-top:16px">${trend}${rankCard}</div>
     ${cuts}
@@ -584,7 +587,7 @@ function renderSales(main){
     <div class="card"><p style="margin:0 0 10px;color:var(--muted);font-size:13px">営業終了後に押してください。レジの現金を数えて差を確かめ、会計履歴を日別の集計にまとめて、済んだ伝票を片付けます（未会計の伝票は残ります）。</p>
       <button class="btn dark" data-a="closeday" ${S.sales.length?'':'disabled'}>日締め（レジ締め）をする</button></div>`:''}
     ${k!=='day'?`<h2 class="h2">日ごとの一覧</h2>
-    <div class="card">${dkeys.length?`<div class="tblwrap"><table><tr><th>日付</th><th>天気</th><th>気温</th><th class="r">売上</th><th class="r">会計数</th><th class="r">客数</th>${METHODS.map(m=>`<th class="r">${esc(m.name)}</th>`).join('')}<th class="r">値引き</th></tr>${[...dkeys].reverse().map(d=>{const x=dm[d],wx=wxOf(d),px=paxOf(x);return `<tr><td class="num">${dlabel(d)}</td><td>${BOSS?`<button class="mini" data-a="wxpick" data-day="${d}">${esc(wxName(wx)||'入れる')}</button>`:esc(wxName(wx)||'—')}</td><td class="num">${esc(wxTemp(wx)||'—')}</td><td class="r num">${yen(x.total)}</td><td class="r num">${x.count}</td><td class="r num">${px?px.n:'—'}</td>${METHODS.map(m=>`<td class="r num">${yen((x.pay||{})[m.id])}</td>`).join('')}<td class="r num">${yen(x.disc)}</td></tr>`}).join('')}</table></div>`:'<p class="empty">この期間の売上はまだありません</p>'}</div>`:'<p class="hint" style="margin-top:16px">上の「週」「月」「年」を押すと、期間ごとの集計と日ごとの一覧が出ます。</p>'}
+    <div class="card">${dkeys.length?`<div class="tblwrap"><table><tr><th>日付</th><th>天気</th><th>気温</th><th class="r">売上</th><th class="r">会計数</th><th class="r">客数</th>${METHODS.map(m=>`<th class="r">${esc(m.name)}</th>`).join('')}<th class="r">値引き</th>${t.fee?'<th class="r">手数料</th><th class="r">手数料引き後</th>':''}</tr>${[...dkeys].reverse().map(d=>{const x=dm[d],wx=wxOf(d),px=paxOf(x);return `<tr><td class="num">${dlabel(d)}</td><td>${BOSS?`<button class="mini" data-a="wxpick" data-day="${d}">${esc(wxName(wx)||'入れる')}</button>`:esc(wxName(wx)||'—')}</td><td class="num">${esc(wxTemp(wx)||'—')}</td><td class="r num">${yen(x.total)}</td><td class="r num">${x.count}</td><td class="r num">${px?px.n:'—'}</td>${METHODS.map(m=>`<td class="r num">${yen((x.pay||{})[m.id])}</td>`).join('')}<td class="r num">${yen(x.disc)}</td>${t.fee?`<td class="r num">−${yen(x.fee)}</td><td class="r num">${yen(x.total-x.fee)}</td>`:''}</tr>`}).join('')}</table></div>`:'<p class="empty">この期間の売上はまだありません</p>'}</div>`:'<p class="hint" style="margin-top:16px">上の「週」「月」「年」を押すと、期間ごとの集計と日ごとの一覧が出ます。</p>'}
     ${BOSS?`<h2 class="h2">データを取り出す ${HP('csv')}</h2><div class="card"><p style="margin:0 0 10px;color:var(--muted);font-size:13px">いま表示している期間（${esc(R.label)}）を、表計算ソフトで開ける形で保存します。</p>
       <div class="row"><button class="btn" data-a="csvdays">日ごとの集計を保存</button><button class="btn" data-a="csvsales">会計1件ずつの明細を保存</button></div></div>`:''}</div>`;
   if(keep){main.scrollTop=keep[0];if(se)se.scrollTop=keep[1];if(main.firstElementChild)main.firstElementChild.scrollTop=keep[2]}
@@ -679,9 +682,9 @@ function csvDays(){
   const R=periodRange(),dm=daySums(R.from,R.to),dkeys=Object.keys(dm).sort();if(!dkeys.length){toast('この期間の売上はまだありません');return}
   const cols=[];dkeys.forEach(d=>dm[d].tg.forEach(e=>{const key=e.t+'|'+e.o;if(!cols.find(c=>c.key===key))cols.push({key,name:e.tn+(e.o?'：'+e.o:'')})}));
   const rs=[...new Set(dkeys.flatMap(d=>dm[d].tx.map(t=>t.r)))].sort((a,b)=>b-a);
-  const rows=[['日付','曜日','天気','開店時の天気','最高気温','最低気温','雨量mm','売上','会計数','会計単価',...METHODS.map(m=>m.name),'値引き','うち持ち帰り',...rs.flatMap(r=>[r+'%対象の売上',r+'%の消費税']),'粗利（原価を入れた品）','釣り銭準備金','数えた現金','現金の差',...cols.map(c=>c.name),...Array.from({length:24},(_,h)=>h+'時')]];
+  const rows=[['日付','曜日','天気','開店時の天気','最高気温','最低気温','雨量mm','売上','会計数','会計単価',...METHODS.map(m=>m.name),'値引き','うち持ち帰り','決済手数料','手数料を引いた売上',...rs.flatMap(r=>[r+'%対象の売上',r+'%の消費税']),'粗利（原価を入れた品）','釣り銭準備金','数えた現金','現金の差',...cols.map(c=>c.name),...Array.from({length:24},(_,h)=>h+'時')]];
   dkeys.forEach(d=>{const x=dm[d],wx=wxOf(d)||{};rows.push([d,DOW[dparse(d).getDay()],wxName(wx),wx.ow||'',wx.hi==null?'':wx.hi,wx.lo==null?'':wx.lo,wx.rain==null?'':wx.rain,x.total,x.count,x.count?Math.round(x.total/x.count):0,
-    ...METHODS.map(m=>(x.pay||{})[m.id]||0),x.disc,x.toA,...rs.flatMap(r=>{const t=x.tx.find(z=>z.r===r);return [t?t.amt:0,t?t.tax:0]}),x.gps?x.gp:'',...(c=>[c.float==null?'':c.float,c.counted==null?'':c.counted,c.diff==null?'':c.diff])(S.cash.find(z=>z.id===d)||{}),...cols.map(c=>{const e=x.tg.find(z=>z.t+'|'+z.o===c.key);return e?(e.o===''?e.n:e.c):0}),...x.hours])});
+    ...METHODS.map(m=>(x.pay||{})[m.id]||0),x.disc,x.toA,x.fee,x.total-x.fee,...rs.flatMap(r=>{const t=x.tx.find(z=>z.r===r);return [t?t.amt:0,t?t.tax:0]}),x.gps?x.gp:'',...(c=>[c.float==null?'':c.float,c.counted==null?'':c.counted,c.diff==null?'':c.diff])(S.cash.find(z=>z.id===d)||{}),...cols.map(c=>{const e=x.tg.find(z=>z.t+'|'+z.o===c.key);return e?(e.o===''?e.n:e.c):0}),...x.hours])});
   dl(SHOP_ID+'_days_'+R.from+'_'+R.to+'.csv',rows);
 }
 async function csvSales(){
@@ -693,8 +696,8 @@ async function csvSales(){
   list.sort((a,b)=>a.at-b.at);
   const tids=[],nids=[];list.forEach(s=>{for(const id in s.tags||{})if(!tids.includes(id))tids.push(id);for(const id in s.notes||{})if(!nids.includes(id))nids.push(id)});
   const nm=id=>(S.tags.find(t=>t.id===id)||{}).name||id;
-  const rows=[['日付','時刻','曜日','天気','No.','席','合計','値引き','支払','担当','取消',...tids.map(nm),...nids.map(nm),'品数','商品']];
-  list.forEach(s=>rows.push([s.day,hm(s.at),DOW[dparse(s.day).getDay()],wxName(wxOf(s.day)),s.no,s.seat,s.total,s.discount||0,salePays(s).map(p=>(METHOD[p.m]||p.m)+(salePays(s).length>1?' '+p.amt:'')).join(' + '),s.by||'',s.void?'取消':'',
+  const rows=[['日付','時刻','曜日','天気','No.','席','合計','値引き','支払','決済手数料','担当','取消',...tids.map(nm),...nids.map(nm),'品数','商品']];
+  list.forEach(s=>rows.push([s.day,hm(s.at),DOW[dparse(s.day).getDay()],wxName(wxOf(s.day)),s.no,s.seat,s.total,s.discount||0,salePays(s).map(p=>(METHOD[p.m]||p.m)+(salePays(s).length>1?' '+p.amt:'')).join(' + '),s.void?0:salePays(s).reduce((a,p)=>a+payFee(p),0),s.by||'',s.void?'取消':'',
     ...tids.map(id=>{const v=(s.tags||{})[id];return v==null?'':[].concat(v).join('・')}),...nids.map(id=>(s.notes||{})[id]||''),
     (s.lines||[]).reduce((a,l)=>a+l.qty,0),(s.lines||[]).map(l=>l.name+((l.mods||[]).length?'('+l.mods.join('・')+')':'')+(l.to?'[持ち帰り]':'')+'×'+l.qty).join(' / ')]));
   dl(SHOP_ID+'_sales_'+R.from+'_'+R.to+'.csv',rows);
@@ -707,7 +710,7 @@ function renderSettings(main,force){
   const secList=[];S.menu.forEach(m=>{if(!secList.find(x=>x.tab===m.tab&&x.sec===m.sec))secList.push({tab:m.tab,sec:m.sec})});
   const reg=S.role==='register';
   main.innerHTML=`<div class="view"><div class="set">
-    <div class="card"><h3>この端末の役割 ${HP('role')}</h3><p>レジに置くタブレットは「メインレジ」、注文を取りに行くスマホは「スタッフ端末」にします。</p>
+    <div class="card"><h3>この端末の役割 ${HP('role')}</h3><p>レジに置くタブレットは「メインレジ」、注文を取りに行くスマホは「スタッフ端末」にします。「売上」は、メインレジ＋店長のIDの時だけ出ます。</p>
       <div class="seg"><button class="${reg?'on':''}" data-a="role" data-r="register">メインレジ</button><button class="${reg?'':'on'}" data-a="role" data-r="staff">スタッフ端末</button></div></div>
     <div class="card"><h3>担当者名 ${HP('staffname')}</h3><p>注文に「誰が取ったか」が残ります。</p><div class="row"><input class="inp" id="staffName" value="${esc(S.staff)}" placeholder="例：たなか" maxlength="12"><button class="btn" data-a="savestaff">保存</button></div></div>
     <div class="card"><h3>新しい注文の通知音 ${HP('sound')}</h3><p>メインレジで、スタッフ端末から注文が届いた時に鳴ります。</p>
@@ -735,6 +738,9 @@ function renderSettings(main,force){
       <div class="row" style="margin-top:12px"><button class="btn" data-a="testprint">テスト印刷</button><button class="btn" data-a="drawer">ドロワーを開ける</button></div>`:''}
       ${S.link.sqApp?`<h4 class="sh">カード端末（Square）との連動</h4><div class="seg">${[[1,'この端末で使う'],[0,'使わない']].map(([v,n])=>`<button class="${!!DEVS.sq===!!v?'on':''}" data-a="devset" data-k="sq" data-v="${v}">${n}</button>`).join('')}</div><p style="margin-top:8px">「使う」にすると、連動する支払い方法で会計した時にSquareのアプリが開きます。この端末にSquareのアプリが入っている必要があります。</p>`:''}
       <p style="margin-top:10px">はじめて使う時は、お客さんの会計の前に、必ず実際の機械で試してください。</p></div>
+    ${BOSS?`<div class="card"><h3>決済手数料 ${HP('fee')}</h3><p>カードやQR決済の会社に払う手数料の率を入れると、売上の画面に「手数料」と「手数料を引いた売上」が出ます。空のままなら計算しません。</p>
+      ${METHODS.filter(m=>!m.cash).map(m=>`<div class="row" style="margin-top:6px"><span style="min-width:90px">${esc(m.name)}</span><input class="inp" id="fee_${m.id}" inputmode="decimal" style="max-width:110px" value="${feeRate(m.id)||''}" placeholder="例 3.24"><span>％</span></div>`).join('')}
+      <div class="row" style="margin-top:12px"><button class="btn pri" data-a="savefee">手数料の率を保存</button></div></div>`:''}
     ${BOSS?`<div class="card"><h3>税と価格 ${HP('tax')}</h3>
       <p>いまの税率：店内 <b>${S.tax.std}％</b>／持ち帰り <b>${redOn(dayOf(Date.now()))}％</b>${(()=>{const n=[...S.tax.red].sort((a,b)=>a.from<b.from?-1:1).find(x=>x.from>dayOf(Date.now()));return n?`　→　${esc(n.from)} から 持ち帰り <b>${n.rate}％</b>`:''})()}</p>
       <h4 class="sh">持ち帰りの切り替えボタン</h4><div class="seg">${[[1,'出す'],[0,'出さない（店内だけの店）']].map(([v,n])=>`<button class="${(S.tax.useTo!==false)===!!v?'on':''}" data-a="txuse" data-v="${v}">${n}</button>`).join('')}</div>
@@ -778,7 +784,7 @@ function qrSvg(t){try{const q=qrcode(0,'M');q.addData(t);q.make();return q.creat
 function render(force){
   renderBar();renderWxAsk();
   const main=$('#main');
-  if(S.role!=='register'&&!BOSS&&S.tab==='sales')S.tab='order';
+  if(!canSales()&&S.tab==='sales')S.tab='order';
   if(S.tab==='order')renderOrder(main);
   else if(S.tab==='feed')renderFeed(main);
   else if(S.tab==='sales')renderSales(main);
@@ -959,6 +965,8 @@ const A={
     const hash=v?await sha(SHOP_ID+':'+v):S.guard.hash;audit('set','店長の暗証番号');
     w(Store.set('config','guard',{hash,acts}),'暗証番号の設定を保存しました').then(()=>render(true))},
   clearpin(){confirmBox('暗証番号をなくす','暗証番号をなくすと、値引きや取消が誰でもできるようになります。','なくす',()=>{audit('set','店長の暗証番号をなくした');w(Store.del('config','guard'),'暗証番号をなくしました').then(()=>render(true))})},
+  savefee(){const rates={};for(const m of METHODS.filter(m=>!m.cash)){const t=$('#fee_'+m.id).value.normalize('NFKC').replace(/[%\s]/g,'');if(!t)continue;const v=Number(t);if(!(v>0&&v<=20)){toast(m.name+'の率は 0〜20 の数字で入れてください（例 3.24）','err');return}rates[m.id]=v}
+    audit('set','決済手数料の率');w(Object.keys(rates).length?Store.set('config','fee',{rates}):Store.del('config','fee'),'手数料の率を保存しました').then(()=>render(true))},
   savelink(){const app=$('#sqApp').value.trim(),map={};METHODS.filter(m=>!m.cash).forEach(m=>{const v=$('#sqM_'+m.id).value;if(v)map[m.id]=v});
     if(app&&!/^sq0id[a-z]-[\w-]{10,}$/.test(app)&&!/^sandbox-sq0id[a-z]-[\w-]{10,}$/.test(app)){toast('アプリIDの形が違うようです（sq0idp- で始まります）','err');return}
     audit('set','カード端末との連動');w(app?Store.set('config','link',{sqApp:app,map}):Store.del('config','link'),'連動の設定を保存しました').then(()=>render(true))},
@@ -1018,7 +1026,8 @@ Store.init().then(()=>{
   setTimeout(()=>{if(!BOSS)return;const t=dayOf(Date.now()),n=[...S.tax.red].sort((a,b)=>a.from<b.from?-1:1).find(x=>x.from>t);if(n&&(dparse(n.from)-dparse(t))/86400000<=45)toast(n.from+' から、持ち帰りの税率が '+n.rate+'％ に変わる予定です。設定の「税と価格」で確認してください','new')},6000);
   Store.sub('config',a=>{
     const g=id=>a.find(x=>x.id===id);
-    const mn=g('menu'),st=g('seats'),sd=g('sold'),tg=g('tags'),tx=g('tax'),gd=g('guard'),lk=g('link');
+    const mn=g('menu'),st=g('seats'),sd=g('sold'),tg=g('tags'),tx=g('tax'),gd=g('guard'),lk=g('link'),fe=g('fee');
+    S.fee=fe&&fe.rates?fe.rates:{};
     S.tax=tx&&Array.isArray(tx.red)&&tx.red.length?{std:tx.std==null?DEFAULT_TAX.std:tx.std,red:tx.red,mode:tx.mode==='base'?'base':'same',inv:tx.inv||'',useTo:tx.useTo!==false}:DEFAULT_TAX;
     S.guard=gd&&gd.hash?{hash:gd.hash,acts:gd.acts||{}}:null;
     S.link=lk&&lk.sqApp?{sqApp:lk.sqApp,map:lk.map||{}}:{sqApp:'',map:{}};
