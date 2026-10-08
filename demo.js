@@ -218,9 +218,6 @@ function seed(db,t,items,sid){
 
 /* ---------- 使い方ガイド ---------- */
 const STEPS=t=>[
- {k:'intro',ti:'はじめに',do:'ここは「'+t.name+'」です。本物と同じ画面を、好きなように触れます。',why:'売上の数字は見本です。この画面を閉じると、入れた内容は全部消えます。壊れることはないので、気になる所をどんどん押してみてください。'},
- {k:'order',ti:'注文を取る',do:'席を選んで、品を押して、「注文を送信」を押してみてください。',why:'伝票を書いて厨房まで持っていく往復がなくなります。トッピングや「'+t.note.split('・')[0]+'」も押すだけなので、聞き間違いや書き間違いが起きにくくなります。',sel:['[data-a="send"]','#checkBar','.item'],tab:'order',
-  ok:(db,sid,st)=>Object.values(db.get('shops/'+sid+'/orders')||{}).some(o=>o.at>st.t0&&o.dev!=='demo-other'&&o.dev!=='demo-phone')},
  {k:'phone',ti:'スタッフのスマホから注文が届く',do:'下のボタンを押すと、ホールのスタッフがスマホで打った注文が届きます。',why:'席で受けた注文は、音と一緒にレジと厨房の画面に出ます。注文を通しに戻る時間を、そのまま次のお客さんに回せます。スマホやタブレットは、いまお持ちのもので動きます。',act:'phone',actLabel:'スマホからの注文を届かせる',
   ok:(db,sid)=>Object.values(db.get('shops/'+sid+'/orders')||{}).some(o=>o.dev==='demo-phone')},
  {k:'feed',ti:'厨房の画面',do:'上の「オーダー」を押してください。品名を押すと線が引けます。出し終わったら「提供済みにする」を押します。',why:'出し忘れと出し間違いが、目で見て分かります。10分たった注文は時刻が赤くなるので、待たせているお客さんに先に気づけます。',sel:['[data-t="feed"]'],tab:'feed',
@@ -239,7 +236,7 @@ const STEPS=t=>[
 ];
 function guide(t,db,sid){
   const app=document.getElementById('app'),el=document.createElement('div');el.id='guide';app.insertBefore(el,document.getElementById('main'));
-  const steps=STEPS(t),st={i:0,open:true,t0:Date.now(),done:{}};
+  const steps=STEPS(t),st={i:0,open:true,t0:Date.now(),done:{}};el.hidden=true;
   const draw=()=>{const s=steps[st.i],last=st.i===steps.length-1,dn=st.done[s.k];
     el.className=st.open?'open':'';
     el.innerHTML=st.open?`<div class="gbox"><div class="ghead"><span class="gnum">${st.i+1}<small>/${steps.length}</small></span><b>${esc(s.ti)}</b>${dn?'<span class="gdone">できました</span>':''}<button class="mini" data-g="fold">たたむ</button></div>
@@ -253,11 +250,100 @@ function guide(t,db,sid){
     else if(g==='act'){const its=(db.get('shops/'+sid+'/config/menu')||{}).items||[],a=its[0],b2=its[Math.min(6,its.length-1)],now=Date.now();
       db.ref('shops/'+sid+'/orders/ph'+now).set({seat:t.seats[3]||t.seats[0],lines:[a,b2].map((it,i)=>({k:'p'+now+i,mid:it.id,name:it.name,unit:it.price,qty:i?1:2,note:'',done:false,to:false,r:10,c:it.cost||0})),status:'new',src:'staff',by:'さとう',dev:'demo-phone',at:now,day:dstr(new Date()),paid:false})}});
   draw();
-  setInterval(()=>{const s=steps[st.i];
+  setInterval(()=>{if(el.hidden)return;const s=steps[st.i];
     document.querySelectorAll('.gpulse').forEach(x=>x.classList.remove('gpulse'));
     if(st.open&&s.sel&&!st.done[s.k]&&!document.querySelector('.helpov')){for(const q of s.sel){const x=[...document.querySelectorAll(q)].find(n=>n.offsetParent&&!n.disabled);if(x){x.classList.add('gpulse');break}}}
     if(s.ok&&!st.done[s.k]){let ok=false;try{ok=s.ok(db,sid,st)}catch(e){}if(ok){st.done[s.k]=true;draw()}}
   },600);
+  return {begin(open){el.hidden=false;st.open=open!==false;st.t0=Date.now();draw()}};
+}
+
+
+/* ---------- はじめの手ほどき：押す場所を、画面の上でそのまま示す ---------- */
+function coach(t,db,sid,items,onEnd){
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  const vis=el=>{if(!el)return false;const r=el.getBoundingClientRect();return r.width>0&&r.height>0};
+  const q=sel=>[...document.querySelectorAll(sel)].find(vis)||null;
+  const tab0=t.tabs[0][0],pool=items.filter(i=>i.tab===tab0);
+  const it=pool.find(i=>i.mods.length&&!i.mods.some(g=>t.groups[g].type==='req'))||pool.find(i=>i.mods.length)||pool[0];
+  let F={t0:Date.now()},timer=null,lastEl=null,lastTxt='';
+  const mk=(c,h)=>{const d=document.createElement('div');d.className=c;if(h)d.innerHTML=h;document.body.appendChild(d);return d};
+  const ring=mk('cring'),tip=mk('ctip'),cur=mk('ccur'),block=mk('cblock','<button class="btn" data-c="stop">お手本を止める</button>');
+  [ring,tip,cur,block].forEach(x=>{x.hidden=true});
+  document.addEventListener('click',e=>{const x=e.target;if(!x.closest)return;
+    if(x.closest('.seat'))F.seat=1;if(x.closest('[data-a="qty"][data-d="1"]'))F.qty=1;if(x.closest('#modal .chip[data-a="mod"]')&&document.querySelector('#modal [data-a="xdel"]'))F.opt=1},true);
+  document.addEventListener('input',e=>{if(e.target.id==='itemNote')F.opt=1},true);
+  const sent=()=>Object.values(db.get('shops/'+sid+'/orders')||{}).some(o=>o.at>F.t0&&!String(o.dev).startsWith('demo-'));
+  /* いまの画面を見て、「次に押す場所」を決める */
+  function next(){
+    if(sent())return null;
+    const view=(document.getElementById('main')||{dataset:{}}).dataset.view,modal=q('#modal .sheet'),xok=q('#modal [data-a="xok"]'),editing=!!document.querySelector('#modal [data-a="xdel"]');
+    if(modal&&xok){
+      if(editing)F.edit=1;
+      if(xok.disabled){const g=[...document.querySelectorAll('#modal .grp')].find(g=>g.querySelector('h4 em')&&!g.querySelector('.chip.on')),c=g&&[...g.querySelectorAll('.chip')].find(vis);
+        if(c)return {n:editing?4:2,el:c,text:'「'+g.querySelector('h4').firstChild.textContent.trim()+'」を選びます',sub:'「必須」と付いているものは、1つ選びます。'}}
+      if(editing&&!F.opt){const cs=[...document.querySelectorAll('#modal .chip[data-a="mod"]')].filter(x=>vis(x)&&!x.classList.contains('on')),c=cs.find(x=>!x.closest('.grp').querySelector('h4 em'))||cs[0];
+        if(c)return {n:4,el:c,text:c.closest('.grp').querySelector('h4 em')?'ここで選び直せます。押してみましょう':'付けたいものを押します',sub:'もう一度押すと外れます。下のメモ欄には「'+t.note.split('・')[0]+'」なども書けます。'};
+        F.opt=1}
+      return {n:editing?4:2,el:xok,text:editing?'「変更を反映」を押します':'「伝票に追加」を押します',sub:editing?'伝票に戻ります。':'伝票に入ります。'};
+    }
+    if(modal)return {n:0,el:q('#modal .x')||q('#modal [data-a="close"]'),text:'この画面は、いったん閉じましょう',sub:''};
+    if(view!=='order')return {n:0,el:q('[data-t="order"]'),text:'「注文・会計」を押して戻りましょう',sub:''};
+    if(!F.seat)return {n:1,el:q('.seat:not(.busy)')||q('.seat'),text:'まず、席を押します',sub:'お客さんが座った席を選ぶだけです。'};
+    if(!document.querySelector('#check [data-a="editline"]')){
+      const b=q('.item[data-id="'+it.id+'"]');
+      if(!b){const back=q('[data-a="hidecheck"]');return back?{n:2,el:back,text:'「← メニュー」を押して戻ります',sub:''}:{n:2,el:q('.cat[data-c="'+tab0+'"]'),text:'「'+t.tabs[0][1]+'」を押します',sub:''}}
+      return {n:2,el:b,text:'品を押します',sub:'押すだけで、伝票に入ります。'};
+    }
+    const plus=q('#check [data-a="qty"][data-d="1"]');
+    if(!plus)return {n:3,el:q('#checkBar'),text:'下の伝票を押して、中身を見ます',sub:''};
+    if(!F.qty)return {n:3,el:plus,text:'「＋」で数を増やせます',sub:'2つ、3つの注文もすぐです。'};
+    if(!F.edit)return {n:4,el:q('#check [data-a="editline"]'),text:'「変更・メモ」を押します',sub:'トッピングや細かい注文は、ここから入れます。'};
+    return {n:5,el:q('#check [data-a="send"]'),text:'「注文を送信」を押します',sub:'これで厨房に届きます。'};
+  }
+  function place(c){
+    const el=c.el,txt=c.n+c.text+c.sub;
+    if(txt!==lastTxt){lastTxt=txt;tip.innerHTML=`${c.n?`<span class="cnum">${c.n}<small>/5</small></span>`:''}<b>${esc(c.text)}</b>${c.sub?`<p>${esc(c.sub)}</p>`:''}${F.auto?'':'<button class="cskip" data-c="skip">説明を飛ばす</button>'}`}
+    if(el!==lastEl){lastEl=el;if(el){const r=el.getBoundingClientRect();if(r.top<70||r.bottom>innerHeight-90)try{el.scrollIntoView({block:'center',behavior:'auto'})}catch(e){}}}
+    tip.hidden=false;
+    if(!el){ring.hidden=true;tip.style.left=Math.max(12,(innerWidth-tip.offsetWidth)/2)+'px';tip.style.top='72px';tip.dataset.pos='';return}
+    const r=el.getBoundingClientRect(),pad=5;ring.hidden=false;
+    ring.style.left=(r.left-pad)+'px';ring.style.top=(r.top-pad)+'px';ring.style.width=(r.width+pad*2)+'px';ring.style.height=(r.height+pad*2)+'px';
+    const tw=tip.offsetWidth,th=tip.offsetHeight,below=r.bottom+th+18<innerHeight,above=r.top-th-18>0;
+    tip.style.left=Math.max(10,Math.min(innerWidth-tw-10,r.left+r.width/2-tw/2))+'px';
+    tip.style.top=(below?r.bottom+14:above?r.top-th-14:Math.max(10,innerHeight-th-10))+'px';tip.dataset.pos=below?'below':above?'above':'';
+    tip.style.setProperty('--ax',Math.max(18,Math.min(tw-18,r.left+r.width/2-parseFloat(tip.style.left)))+'px');
+  }
+  const hide=()=>{[ring,tip,cur,block].forEach(x=>{x.hidden=true});lastEl=null;lastTxt=''};
+  function card(title,body,btns){
+    const o=mk('ccard',`<div class="cbox"><h2>${esc(title)}</h2>${body.map(x=>`<p>${esc(x)}</p>`).join('')}<div class="cbtns">${btns.map(([k,n,pri])=>`<button class="btn ${pri?'pri':''}" data-c="${k}">${esc(n)}</button>`).join('')}</div></div>`);
+    return new Promise(res=>o.addEventListener('click',e=>{const b=e.target.closest('[data-c]');if(b){o.remove();res(b.dataset.c)}}));
+  }
+  function finish(skipped){
+    clearInterval(timer);timer=null;hide();
+    if(skipped){onEnd(false);return}
+    card('注文が厨房に届きました',['これで注文は終わりです。伝票を書いて厨房へ持っていく往復が、まるごとなくなります。','聞き間違いや書き間違いも起きにくくなり、席ごとの合計は自動で出ます。'],[['go','つづきを見る',1]]).then(()=>onEnd(true));
+  }
+  function run(){
+    F={t0:Date.now()};hide();
+    timer=setInterval(()=>{if(document.querySelector('.helpov')||document.querySelector('.ccard')){ring.hidden=true;tip.hidden=true;return}const c=next();if(!c){finish(false);return}place(c)},250);
+  }
+  tip.addEventListener('click',e=>{if(e.target.closest('[data-c="skip"]'))finish(true)});
+  /* お手本：同じ手順を、画面が自分で動いて見せる */
+  async function robot(){
+    F={t0:Date.now(),auto:1};block.hidden=false;cur.hidden=false;cur.style.left=(innerWidth/2)+'px';cur.style.top=(innerHeight*.7)+'px';
+    block.onclick=e=>{if(e.target.closest('[data-c="stop"]'))F.stop=1};
+    await wait(500);
+    for(let i=0;i<18&&!F.stop;i++){const c=next();if(!c)break;if(!c.el){await wait(400);continue}
+      place(c);const r=c.el.getBoundingClientRect();cur.style.left=(r.left+r.width/2)+'px';cur.style.top=(r.top+r.height/2)+'px';
+      await wait(1500);if(F.stop)break;cur.classList.add('tap');c.el.click();await wait(260);cur.classList.remove('tap');await wait(520)}
+    const stopped=F.stop;hide();
+    if(document.querySelector('#modal .sheet [data-a="close"]')&&stopped)document.querySelector('#modal .sheet [data-a="close"]').click();
+    const a=await card(stopped?'お手本を止めました':'いまのが、注文の流れです',['席を押す → 品を押す → 送信。これだけです。','次は、自分の指でやってみましょう。押す場所は画面に出ます。'],[['try','やってみる',1],['free','説明なしで触る']]);
+    if(a==='try')run();else onEnd(false);
+  }
+  card('「'+t.name+'」へようこそ',['本物と同じレジの画面です。好きなように押して大丈夫です。壊れることはありません。','売上の数字は見本です。画面を閉じると、入れた内容は全部消えます。'],[['watch','お手本を見る（約20秒）',1],['try','自分で触ってみる'],['free','説明なしで触る']])
+    .then(a=>{if(a==='watch')robot();else if(a==='try')run();else onEnd(false)});
 }
 
 /* ---------- 最初の画面：お店を選ぶ ---------- */
@@ -267,7 +353,8 @@ function start(t){
   seed(db,t,items,sid);
   window.POSAuth={ROLE:{manager:'店長',staff:'スタッフ',master:'マスター'},listLogins:async()=>[],msg:()=>''};
   window.startPOS(cfg,sid,db,{shop:sid,role:'manager',login:'demo',uid:'demo',demo:true,auth:{signOut(){location.reload()}},kick(){}});
-  guide(t,db,sid);
+  const G=guide(t,db,sid);
+  coach(t,db,sid,items,ok=>G.begin(ok));
 }
 function chooser(){
   document.title='POSレジ 体験デモ';
