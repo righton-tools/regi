@@ -77,7 +77,14 @@ function card(id){
       <label>いまのパスワード（同じIDのまま変える時だけ）<input class="inp" data-i="cur" type="password" autocomplete="off"></label></div>
       <p class="lerr" data-f="lmsg"></p><button class="btn dark" data-b="login">このログインを作る・作り直す</button>
       <p style="margin:10px 0 0;font-size:12px;color:var(--muted)">作り直すと、同じ種類の古いログインは使えなくなります。お店の人が開くページ：<span class="num">${esc(base)}</span></p></details>
-    <details><summary>日別の売上（日締め済み・直近31日） ${HP('days')}</summary><div data-f="days"></div></details>`;
+    <details><summary>日別の売上（日締め済み・直近31日） ${HP('days')}</summary><div data-f="days"></div></details>
+    <details><summary>バックアップ（データの控え） ${HP('backup')}</summary><p data-f="bk" style="margin:6px 0 10px;font-size:13px"></p>
+      <p class="lerr" data-f="bmsg"></p><button class="btn dark" data-b="backup">このお店のデータを保存する</button></details>`;
+  el.querySelector('[data-b="backup"]').onclick=async e=>{const m=el.querySelector('[data-f="bmsg"]');m.textContent='集めています…';e.target.disabled=true;
+    try{const v=(await DB.ref('shops/'+id).once('value')).val()||{},now=new Date(),p=n=>String(n).padStart(2,'0'),stamp=now.getFullYear()+p(now.getMonth()+1)+p(now.getDate())+'-'+p(now.getHours())+p(now.getMinutes());
+      const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({shop:id,at:now.toISOString(),data:v})],{type:'application/json'}));a.download='backup_'+id+'_'+stamp+'.json';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);
+      await DB.ref('index/'+id+'/bk').set(Date.now());m.textContent='保存しました。ファイルは大事な場所（会社の共有フォルダなど）に置いてください。'}
+    catch(err){m.textContent='保存できませんでした。通信を確認してください。'}e.target.disabled=false};
   el.querySelector('[data-b="login"]').onclick=async e=>{const q=s=>el.querySelector(s),m=q('[data-f="lmsg"]');m.textContent='作成中…';e.target.disabled=true;
     try{const r=await PA.replaceLogin(DB,id,q('[data-i="role"]').value,q('[data-i="id"]').value,q('[data-i="pw"]').value,q('[data-i="cur"]').value);
       m.textContent='ログイン「'+r.login+'」を作りました。'+(r.removed?'古いログインは使えなくなりました。':'');q('[data-i="pw"]').value='';q('[data-i="cur"]').value='';loadLogins(id)}
@@ -94,6 +101,8 @@ function render(){
       <dl><div><dt>会計数</dt><dd class="num">${s.count}件</dd></div><div><dt>未会計の注文</dt><dd class="num">${s.open}件</dd></div><div><dt>未確認の注文</dt><dd class="num">${s.fresh}件</dd></div></dl>`;
     const days=Object.entries((data[id]||{}).days||{}).sort((a,b)=>a[0]<b[0]?1:-1).slice(0,31);
     el.querySelector('[data-f="days"]').innerHTML=days.length?`<div class="tblwrap"><table><tr><th>日付</th><th class="r">売上</th><th class="r">会計数</th></tr>${days.map(([d,v])=>`<tr><td class="num">${esc(d)}</td><td class="r num">${yen(v.total)}</td><td class="r num">${v.count||0}</td></tr>`).join('')}</table></div>`:'<p class="empty" style="padding:12px">まだ日締めがありません</p>';
+    const bk=shops[id].bk,bd=bk?Math.floor((Date.now()-bk)/86400000):null;
+    el.querySelector('[data-f="bk"]').innerHTML=bk?'最後に保存した日：'+esc(new Date(bk).toLocaleDateString('ja-JP'))+(bd>=7?'　<b style="color:var(--shu)">'+bd+'日たっています。保存してください</b>':''):'<b style="color:var(--shu)">まだ一度も保存していません</b>';
     const lg=logins[id];
     el.querySelector('[data-f="logins"]').textContent=!lg?'確認中…':'店長用ID：'+(lg.filter(x=>x.role==='manager').map(x=>x.login).join('、')||'まだありません')+'　／　スタッフ用ID：'+(lg.filter(x=>x.role==='staff').map(x=>x.login).join('、')||'まだありません');
   });

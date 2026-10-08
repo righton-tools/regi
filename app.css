@@ -160,7 +160,8 @@ textarea.inp{height:auto;padding:10px 12px;width:100%}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .seg button{border:0;background:var(--surface);height:48px;padding:0 18px;font-weight:700}
 .seg button.on{background:var(--shu);color:var(--shu-ink)}
-.mrow{display:grid;grid-template-columns:minmax(0,1fr) 96px 64px;gap:8px;margin-bottom:6px}
+.mrow{display:grid;grid-template-columns:minmax(0,1fr) 92px 84px auto;gap:8px;margin-bottom:6px;align-items:center}
+.mrow .tck{display:flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap}.mrow .tck input{width:20px;height:20px}
 
 /* モーダル */
 #modal{position:fixed;inset:0;background:var(--scrim);z-index:50;display:grid;place-items:center;padding:16px}
@@ -300,3 +301,95 @@ textarea.inp{height:auto;padding:10px 12px;width:100%}
 #wxask[hidden]{display:none}
 #wxask .wxa-sub{color:var(--muted);font-size:12px;margin-right:4px}
 #wxask .chip{min-height:44px;background:var(--surface)}
+
+/* 店内／持ち帰り */
+.tob{font-style:normal;font-size:11px;font-weight:700;background:var(--warn-soft);color:var(--warn);border-radius:6px;padding:1px 6px;margin-left:4px;white-space:nowrap}
+.tomode{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.tomode .seg{flex:1;display:flex}.tomode .seg button{flex:1;height:44px;padding:0 6px;font-size:14px}
+.ln.paidln{opacity:.5}
+/* 会計 */
+.pstep{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;margin:12px 0 8px}
+.pay>div>.pstep:first-child{margin-top:0}
+.pstep b{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--ink);color:var(--bg);font-size:13px}
+.pmode{display:flex;width:100%}.pmode button{flex:1;padding:0 6px;font-size:14px}
+.seg button:disabled{opacity:.4}
+.seg.wrap{flex-wrap:wrap;display:flex}.seg.wrap button{flex:1 1 auto;border-bottom:1px solid var(--line)}
+.psub{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 4px;font-size:14px}
+.psub b{font-size:20px}
+.plines{margin-top:8px}
+.plines div{align-items:center}
+.plines div>span:first-child{flex:1;min-width:0}
+.plines.pick div{padding:6px 0}
+.plines.pick div.off>span:first-child,.plines.pick div.off>.num:last-child{opacity:.45}
+.plines .step small{font-weight:400;color:var(--muted);font-size:11px}
+.discrow{padding:0;gap:0;overflow:hidden}
+.discrow .fbtn{flex:1;display:flex;justify-content:space-between;align-items:center;border:0;background:none;padding:8px 12px;min-height:52px;text-align:left;color:inherit;font:inherit}
+.discrow .fbtn b{font-size:22px}.discrow small{font-size:12px;font-weight:400}
+.discrow .dm{border:0;border-left:1px solid var(--line);border-radius:0;align-self:stretch}
+.discrow .dm button{height:auto;min-height:52px;padding:0 12px}
+.fld small{font-size:11px;color:var(--muted);font-weight:400}
+.fld.warn{background:var(--warn-soft);border-color:var(--warn)}.fld.warn b{color:var(--warn)}
+.paid{margin-top:10px;border:1px solid var(--ok);background:var(--ok-soft);border-radius:10px;padding:8px 12px;font-size:14px}
+.paid>div{display:flex;justify-content:space-between;padding:3px 0}
+.paid .rem{border-top:1px dashed var(--ok);margin-top:4px;padding-top:6px;font-weight:700}.paid .rem b{font-size:22px}
+.paid .mini{margin-top:6px}
+.pinsheet{width:min(100%,360px)}
+.pindots{height:52px;display:grid;place-items:center;border:1px solid var(--line);border-radius:10px;font-size:26px;letter-spacing:8px;background:var(--surface2)}
+.pindots span{font-size:13px;letter-spacing:0;color:var(--muted)}
+.pad .okk{background:var(--shu);color:var(--shu-ink);border-color:var(--shu)}
+.cashrows{margin-top:10px;font-size:14px}
+.cashrows>div{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.cashrows .tot{border-bottom:0;font-weight:700}.cashrows .tot b{font-size:22px}
+.sh{margin:14px 0 6px;font-size:13px;color:var(--muted)}
+.tck{display:inline-flex;align-items:center;gap:6px;margin:4px 14px 4px 0;font-size:14px;min-height:40px}
+.tck input[type=checkbox]{width:22px;height:22px}
+@media (max-width:640px){.mrow{grid-template-columns:minmax(0,1fr) 80px}.mrow input[id^=mc_]{grid-column:1}.pmode button{font-size:13px}}
+
+.pstep .pamt{margin-left:auto;height:34px;font-size:12px;padding:0 10px}
+.pay .pad{gap:6px;margin-top:8px}.pay .pad button{height:48px}
+.pay .quick{gap:6px;margin-top:6px}.pay .quick button{height:40px}
+.pay .fld{min-height:48px;margin-top:6px}
+.pay .pstep{margin:10px 0 6px}
+
+/* デモ：お店を選ぶ画面と、使い方ガイド */
+.dsel{height:100%;overflow-y:auto;background:var(--bg)}
+.dselin{max-width:880px;margin:0 auto;padding:28px 16px 40px}
+.dsel h1{font-size:26px;margin:0 0 8px}
+.dsel p{margin:0 0 18px;color:var(--muted);font-size:15px;line-height:1.7}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.dcard{display:grid;grid-template-columns:52px minmax(0,1fr);gap:2px 12px;align-items:center;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:14px;min-height:84px;color:inherit;font:inherit}
+.dcard i{grid-row:1/3;width:52px;height:52px;border-radius:12px;display:grid;place-items:center;background:var(--c);color:#fff;font-style:normal;font-weight:900;font-size:20px}
+.dcard b{font-size:17px;align-self:end}
+.dcard small{font-size:12px;color:var(--muted);align-self:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dcard:hover,.dcard:focus-visible{border-color:var(--c);box-shadow:0 0 0 2px var(--c)}
+.dnote{margin-top:18px!important;font-size:13px!important}
+#guide{flex:none;border-bottom:1px solid var(--line);background:var(--warn-soft)}
+#guide .gbar{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;padding:8px 16px;font:inherit;color:inherit;text-align:left;min-height:44px}
+#guide .gbar b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+#guide .gbar span:last-child{font-size:12px;color:var(--muted);white-space:nowrap}
+#guide .gbox{padding:10px 16px 12px;max-width:980px}
+#guide .ghead{display:flex;align-items:center;gap:10px}
+#guide .ghead b{flex:1;font-size:16px}
+#guide .gnum{display:inline-flex;align-items:baseline;justify-content:center;gap:2px;line-height:28px;min-width:44px;height:28px;border-radius:14px;background:var(--warn);color:#fff;font-weight:700;font-size:14px;padding:0 8px;white-space:nowrap}
+#guide .gnum small{font-weight:400;font-size:11px;opacity:.85}
+#guide .gdone{font-size:12px;font-weight:700;color:var(--ok);background:var(--ok-soft);border-radius:6px;padding:2px 8px;white-space:nowrap}
+#guide .ghead .mini{height:34px}
+#guide p{margin:8px 0 0;font-size:14px;line-height:1.65}
+#guide .gdo{font-weight:700}
+#guide .gwhy b{display:inline-block;font-size:11px;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:0 6px;margin-right:8px;color:var(--muted)}
+#guide .gact{margin-top:8px;height:46px}
+#guide .gnav{display:flex;gap:8px;margin-top:10px}
+#guide .gnav .btn{height:42px;padding:0 16px}
+.gpulse{outline:3px solid var(--warn)!important;outline-offset:2px;animation:gpulse 1.2s ease-in-out infinite}
+@keyframes gpulse{50%{outline-color:transparent}}
+@media (prefers-reduced-motion:reduce){.gpulse{animation:none}}
+@media (max-width:640px){.dsel h1{font-size:22px}#guide .gbox{padding:8px 12px 10px}#guide p{font-size:13px}}
+
+/* 幅のせまい画面：タブを2段目に回して、全部のタブが見えるようにする */
+@media (max-width:560px){
+  .bar{flex-wrap:wrap;row-gap:0;padding:0 12px}
+  .bar .logo{min-height:48px;align-items:center}.logo b{font-size:20px}.logo.haslogo img{height:32px}
+  .bar .meta{margin-left:auto}
+  .bar .tabs{order:3;flex:0 0 100%;justify-content:space-between;border-top:1px solid rgba(255,255,255,.12)}
+  .bar .tab{height:44px;flex:1;padding:0 4px;text-align:center}
+}
