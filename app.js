@@ -375,7 +375,7 @@ async function confirmPay(){
   const rest=P.groups.some(g=>g.rem-((C.lines.find(l=>l.key===g.key)||{}).qty||0)>0);
   P=null;showDone({...sale,id},rest);
   const cash=pays.some(p=>isCash(p.m));
-  if(DEVS.prn==='pass'&&(DEVS.auto||(DEVS.drawer&&cash))){ls.set('lastDone',{id,rest,at:Date.now()});setTimeout(()=>{GO.href=passUrl(DEVS.auto?receiptHtml(sale):'',DEVS.drawer&&cash)},500)}
+  if(hasDev()&&(DEVS.auto||(DEVS.drawer&&cash))){if(navDev())ls.set('lastDone',{id,rest,at:Date.now()});setTimeout(()=>devOut(DEVS.auto?receiptText(sale):'',DEVS.drawer&&cash),500)}
 }
 function showDone(sale,rest){
   RCPT=sale;const cash=salePays(sale).some(p=>isCash(p.m));
@@ -400,11 +400,112 @@ function renderPin(){
 const audit=(act,txt,amt)=>{try{Store.set('audit',dayOf(Date.now())+'/'+uid(),{at:Date.now(),act,txt:String(txt||'').slice(0,120),amt:amt||0,by:who(),login:ME.login||'',dev:DEV})}catch(e){}};
 /* ---------- 機械との連動（この端末の設定。使う時だけオンにする） ---------- */
 const GO={set href(u){if(window.__go)window.__go(u);else location.href=u}};
-const DEVS={prn:ls.get('prn','browser'),paper:ls.get('paper',576),auto:ls.get('autoPrint',false),drawer:ls.get('drawer',false),sq:ls.get('sq',false)};
+const DEVS={prn:ls.get('prn','browser'),paper:ls.get('paper',576),auto:ls.get('autoPrint',false),drawer:ls.get('drawer',false),sq:ls.get('sq',false),pin:ls.get('pin',false),baud:ls.get('baud',9600),direct:ls.get('direct','serial'),station:ls.get('station',false)};
 const selfUrl=()=>location.origin+location.pathname;
-const receiptHtml=s=>'<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:0 8px;font-family:sans-serif}pre{font-family:monospace;font-size:24px;line-height:1.35;white-space:pre-wrap;word-break:break-all;margin:0}</style></head><body><pre>'+esc(receiptText(s))+'</pre></body></html>';
+const textHtml=t=>'<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:0 8px;font-family:sans-serif}pre{font-family:monospace;font-size:24px;line-height:1.35;white-space:pre-wrap;word-break:break-all;margin:0}</style></head><body><pre>'+esc(t)+'</pre></body></html>';
 /* Star PassPRNT（スター精密の中継アプリ）：印刷とドロワー。公式の仕様どおりのURLで呼び出す */
 const passUrl=(html,drawer)=>'starpassprnt://v1/print/nopreview?'+(html?'html='+encodeURIComponent(html)+'&size='+DEVS.paper+'&cut=partial&':'')+'drawer='+(drawer?'ahead':'off')+'&back='+encodeURIComponent(selfUrl()+location.search);
+/* ---------- プリンターとドロワーの出し分け ----------
+   pass=スター精密（Star PassPRNT）／epson=エプソン（TM Print Assistant）／sii=セイコー（SII URL Print Agent）
+   rawbt=Androidの中継アプリRawBT（ESC/POSの汎用プリンター）／direct=Chromeから直接（Web Serial・Web Bluetooth） */
+const PRN=[['browser','ブラウザの印刷'],['pass','スター精密'],['epson','エプソン'],['sii','セイコー（SII）'],['rawbt','そのほか（Android）'],['direct','直接つなぐ（Chrome）'],['relay','プリンター係に送る'],['none','印刷しない']];
+const hasDev=()=>['pass','epson','sii','rawbt','direct','relay'].includes(DEVS.prn);
+const navDev=()=>['pass','epson','sii'].includes(DEVS.prn);
+const backUrl=x=>{const q=new URLSearchParams(location.search);q.set('prn',x);return selfUrl()+'?'+q.toString()};
+/* レシートを白黒の画像にする（プリンターに日本語の文字が入っていなくても出せるように） */
+function rcptCanvas(text){
+  const W=+DEVS.paper===384?384:576,fs=W===384?22:24,lh=Math.round(fs*1.4),pad=8,c=document.createElement('canvas'),x=c.getContext('2d'),font=fs+'px monospace';
+  x.font=font;const rows=[];
+  String(text).split('\n').forEach(l=>{let cur='';for(const ch of l){if(cur&&x.measureText(cur+ch).width>W-pad*2){rows.push(cur);cur=ch}else cur+=ch}rows.push(cur)});
+  c.width=W;c.height=rows.length*lh+pad*2;x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#000';x.font=font;x.textBaseline='top';
+  rows.forEach((r,n)=>x.fillText(r,pad,pad+n*lh));return c;
+}
+/* ESC/POS（レシートプリンターの共通の命令）：初期化→ドロワー→画像→紙送り→カット */
+function escposBytes(text,drawer){
+  const b=[0x1b,0x40];if(drawer)b.push(0x1b,0x70,DEVS.pin?1:0,0x19,0xfa);
+  if(text){const c=rcptCanvas(text),w=c.width,h=c.height,d=c.getContext('2d').getImageData(0,0,w,h).data,bw=w>>3;
+    for(let y0=0;y0<h;y0+=200){const n=Math.min(200,h-y0);b.push(0x1d,0x76,0x30,0,bw&255,bw>>8,n&255,n>>8);
+      for(let y=y0;y<y0+n;y++)for(let xb=0;xb<bw;xb++){let v=0;for(let k=0;k<8;k++){const i=(y*w+xb*8+k)*4;if(d[i]*.299+d[i+1]*.587+d[i+2]*.114<150)v|=0x80>>k}b.push(v)}}
+    b.push(0x1b,0x64,3,0x1d,0x56,0x42,0)}
+  return new Uint8Array(b);
+}
+const b64=u=>{let t='';for(let i=0;i<u.length;i+=0x8000)t+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(t)};
+const rawbtUrl=(text,drawer)=>'intent:base64,'+b64(escposBytes(text,drawer))+'#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
+/* エプソン：ePOS-Print XML を TM Print Assistant に渡す。文字はプリンター内蔵の日本語で印字する */
+const xe=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function epsonUrl(text,drawer){
+  let x='<epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print">';
+  if(drawer)x+='<pulse drawer="drawer_'+(DEVS.pin?2:1)+'" time="pulse_100"/>';
+  if(text){x+='<text lang="ja"/>';String(text).replace(/−/g,'-').split('\n').forEach(l=>{x+=(l?'<text>'+xe(l)+'</text>':'')+'<feed/>'});x+='<feed line="2"/><cut type="feed"/>'}
+  x+='</epos-print>';
+  return 'tmprintassistant://tmprintassistant.epson.com/print?success='+encodeURIComponent(backUrl('ok'))+'&ver=1&data-type=eposprintxml&data='+encodeURIComponent(x);
+}
+/* セイコー：受け付けるのはPDFだけなので、レシートの画像を1ページのPDFにして渡す */
+function rcptPdf(text){
+  const c=text?rcptCanvas(text):document.createElement('canvas');
+  if(!text){c.width=c.height=8;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,8,8)}
+  const jpg=atob(c.toDataURL('image/jpeg',.6).split(',')[1]),k=72/203,pw=(c.width*k).toFixed(2),ph=(c.height*k).toFixed(2),cs='q '+pw+' 0 0 '+ph+' 0 0 cm /I Do Q';
+  const objs=['<</Type/Catalog/Pages 2 0 R>>','<</Type/Pages/Kids[3 0 R]/Count 1>>','<</Type/Page/Parent 2 0 R/MediaBox[0 0 '+pw+' '+ph+']/Resources<</XObject<</I 4 0 R>>>>/Contents 5 0 R>>',
+    '<</Type/XObject/Subtype/Image/Width '+c.width+'/Height '+c.height+'/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length '+jpg.length+'>>\nstream\n'+jpg+'\nendstream','<</Length '+cs.length+'>>\nstream\n'+cs+'\nendstream'];
+  let pdf='%PDF-1.4\n';const off=[];objs.forEach((o,n)=>{off.push(pdf.length);pdf+=(n+1)+' 0 obj\n'+o+'\nendobj\n'});
+  const xr=pdf.length;return pdf+'xref\n0 '+(objs.length+1)+'\n0000000000 65535 f \n'+off.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')+'trailer\n<</Size '+(objs.length+1)+'/Root 1 0 R>>\nstartxref\n'+xr+'\n%%EOF';
+}
+const siiUrl=(text,drawer)=>'siiprintagent://1.0/print?Format=pdf&Data='+encodeURIComponent(btoa(rcptPdf(text)))+'&Drawer='+(drawer?'yes':'no')+(text?'&CutType=partial':'&CutType=off&CutFeed=no')+'&PaperWidth='+(+DEVS.paper===384?58:80)+'&FitToWidth=yes&CallbackSuccess='+encodeURIComponent(backUrl('ok'))+'&CallbackFail='+encodeURIComponent(backUrl('ng'));
+/* Chromeから直接：USB・Bluetoothのシリアル（Web Serial）か、BLE（Web Bluetooth） */
+const BSV=[0x18f0,0xff00,0xffe0,0xfee7,'49535343-fe7d-4ae5-8fa9-9fafd205e455','e7810a71-73ae-499d-8c15-faa9aef0c3f2'];
+let BLE=null;
+async function directSend(bytes){
+  if(DEVS.direct==='ble'){
+    if(!BLE&&navigator.bluetooth&&navigator.bluetooth.getDevices){try{BLE=(await navigator.bluetooth.getDevices())[0]||null}catch(e){}}
+    if(!BLE)throw new Error('nosel');
+    if(!BLE.gatt.connected)await BLE.gatt.connect();
+    let ch=null;for(const sv of await BLE.gatt.getPrimaryServices()){for(const c of await sv.getCharacteristics())if(c.properties.writeWithoutResponse||c.properties.write){ch=c;break}if(ch)break}
+    if(!ch)throw new Error('nochar');
+    for(let i=0;i<bytes.length;i+=100){const part=bytes.subarray(i,i+100);if(ch.properties.writeWithoutResponse)await ch.writeValueWithoutResponse(part);else await ch.writeValueWithResponse(part);await new Promise(r=>setTimeout(r,10))}
+    return}
+  if(!navigator.serial)throw new Error('nosup');
+  const ports=await navigator.serial.getPorts();if(!ports.length)throw new Error('nosel');const p=ports[0];
+  await p.open({baudRate:+DEVS.baud||9600});
+  try{const w=p.writable.getWriter();await w.write(bytes);await w.close()}finally{try{await p.close()}catch(e){}}
+}
+const DEVERR={nosel:'プリンターが選ばれていません。設定の「機械との連動」で選んでください',nosup:'このブラウザでは直接つなげません。パソコンかAndroidのChromeで開いてください',nochar:'このプリンターには直接つなげませんでした。「そのほか（Android）」を試してください'};
+/* プリンター係：iPadのようにプリンターへ直接つなげない端末の印刷とドロワーを、つなげる端末（AndroidやパソコンのChrome）が代わりに出す。
+   依頼は printq に1件ずつ置き、係の端末が拾って印刷したら消す。古い依頼（1分以上前）は出さずに捨てる（開店時に勝手にドロワーが開かないように） */
+let PQ=[],PST=null,pqBusy=false;const pqMine={};
+const stationOn=()=>DEVS.prn==='direct'&&!!DEVS.station;
+const stationAlive=()=>!!PST&&Date.now()-PST.at<150000;
+function stationBeat(){if(Store.mode==='wait')return;if(stationOn()){Store.set('prnst','main',{at:Date.now(),dev:DEV,name:who()});try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}pqRun()}else if(PST&&PST.dev===DEV)Store.del('prnst','main')}
+function relaySend(text,drawer){
+  const id=uid();pqMine[id]={seen:false};Store.set('printq',id,{at:Date.now(),text:text||'',drawer:!!drawer,from:DEV,st:'new'});
+  setTimeout(()=>{const j=PQ.find(x=>x.id===id);if(pqMine[id]&&j&&j.st==='new'){delete pqMine[id];Store.del('printq',id);toast('プリンター係の端末が応答しません。その端末でレジの画面が開いているか確認してください','err')}},12000);
+}
+async function pqRun(){
+  if(pqBusy||!stationOn())return;pqBusy=true;
+  try{for(const j of [...PQ].sort((a,b)=>a.at-b.at)){if(j.st!=='new')continue;
+      if(Date.now()-j.at>60000){Store.del('printq',j.id);continue}
+      j.st='doing';await Store.update('printq',j.id,{st:'doing'});
+      try{await directSend(escposBytes(j.text,j.drawer));await Store.del('printq',j.id);toast(j.text?'レシートを印刷しました':'ドロワーを開けました')}
+      catch(e){await Store.update('printq',j.id,{st:'err'});toast(DEVERR[e.message]||'プリンターに送れませんでした。電源と接続を確認してください','err')}}
+  }finally{pqBusy=false}
+}
+function pqSeen(){
+  for(const id in pqMine){const j=PQ.find(x=>x.id===id);
+    if(!j){if(pqMine[id].seen)delete pqMine[id];continue}
+    pqMine[id].seen=true;
+    if(j.st==='err'){delete pqMine[id];Store.del('printq',id);toast('プリンター係の端末で印刷できませんでした。プリンターの電源と接続を確認してください','err')}}
+}
+/* 印刷とドロワーの入口。text が空ならドロワーだけ */
+function devOut(text,drawer){
+  const k=DEVS.prn;
+  try{
+    if(k==='pass')GO.href=passUrl(text?textHtml(text):'',drawer);
+    else if(k==='epson')GO.href=epsonUrl(text,drawer);
+    else if(k==='sii'||k==='rawbt'){const u=k==='sii'?siiUrl(text,drawer):rawbtUrl(text,drawer);
+      if(u.length>(k==='sii'?260000:700000)){toast('レシートが長すぎて送れませんでした。「ブラウザの印刷」で出してください','err');return}GO.href=u}
+    else if(k==='relay')relaySend(text,drawer);
+    else if(k==='direct')directSend(escposBytes(text,drawer)).catch(e=>toast(DEVERR[e.message]||'プリンターに送れませんでした。電源と接続を確認してください','err'));
+  }catch(e){toast('印刷の準備ができませんでした','err')}
+}
 /* Square POSアプリ（カード・PayPayなどの端末）：金額を渡して支払い、結果を受け取る */
 function sqLaunch(amount,tender){
   const state=uid(),cb=selfUrl(),app=S.link.sqApp;
@@ -421,8 +522,8 @@ function sqLaunch(amount,tender){
 const RET=(()=>{try{const q=new URLSearchParams(location.search),h=location.href;let r=null;
   if(q.get('data')){const d=JSON.parse(q.get('data'));r={sq:true,ok:d.status==='ok',txn:d.transaction_id||d.client_transaction_id||'',err:d.error_code||'',state:d.state||''}}
   else if(h.includes('com.squareup.pos.')){const g=n=>q.get('com.squareup.pos.'+n)||'';r={sq:true,ok:!g('ERROR_CODE')&&!!(g('SERVER_TRANSACTION_ID')||g('CLIENT_TRANSACTION_ID')),txn:g('SERVER_TRANSACTION_ID')||g('CLIENT_TRANSACTION_ID'),err:g('ERROR_CODE'),state:g('REQUEST_METADATA')}}
-  else{const m=h.match(/passprnt_code=(\d+)/);if(m)r={pp:true,code:+m[1]}}
-  if(r){['data','passprnt_code','passprnt_message'].forEach(k=>q.delete(k));[...q.keys()].forEach(k=>{if(k.startsWith('com.squareup.pos.')||k.includes('passprnt_'))q.delete(k)});
+  else{const m=h.match(/passprnt_code=(\d+)/),pv=q.get('prn');if(m)r={pp:true,code:+m[1]};else if(pv)r={pp:true,code:pv==='ok'?0:(parseInt(q.get('Code')||q.get('code'))||-1)}}
+  if(r){['data','passprnt_code','passprnt_message','prn','Code','Message','code','message'].forEach(k=>q.delete(k));[...q.keys()].forEach(k=>{if(k.startsWith('com.squareup.pos.')||k.includes('passprnt_'))q.delete(k)});
     history.replaceState(null,'',location.pathname+(q.toString()?'?'+q.toString():''))}
   return r}catch(e){return null}})();
 const SQERR={payment_canceled:'支払いが取り消されました',TRANSACTION_CANCELED:'支払いが取り消されました',not_logged_in:'Squareのアプリにログインしてください',USER_NOT_LOGGED_IN:'Squareのアプリにログインしてください',no_network_connection:'通信できませんでした',NO_NETWORK:'通信できませんでした',client_not_authorized_for_user:'アプリIDの設定を確認してください',UNAUTHORIZED_CLIENT_ID:'アプリIDの設定を確認してください'};
@@ -577,7 +678,7 @@ function renderSales(main){
       <div class="cashrows"><div><span>釣り銭の準備金</span><b class="num">${yen(ce.float)}</b></div><div><span>現金の売上</span><b class="num">${yen(ce.sales)}</b></div>
         ${ce.ios.map(x=>`<div><span>${x.amt<0?'出金':'入金'}　${esc(x.memo||'')}<small class="num">　${hm(x.at)} ${esc(x.by||'')}</small></span><b class="num">${x.amt<0?'−':'+'}${yen(Math.abs(x.amt))}</b></div>`).join('')}
         <div class="tot"><span>レジにあるはずの現金</span><b class="num">${yen(ce.expect)}</b></div></div>
-      <div class="row" style="margin-top:10px"><button class="btn" data-a="cashio" data-s="in">入金</button><button class="btn" data-a="cashio" data-s="out">出金</button>${DEVS.prn==='pass'?'<button class="btn" data-a="drawer">ドロワーを開ける</button>':''}</div></div>`
+      <div class="row" style="margin-top:10px"><button class="btn" data-a="cashio" data-s="in">入金</button><button class="btn" data-a="cashio" data-s="out">出金</button>${hasDev()?'<button class="btn" data-a="drawer">ドロワーを開ける</button>':''}</div></div>`
     :crec&&crec.counted!=null?`<h2 class="h2">レジ締めの記録</h2><div class="card"><div class="cashrows"><div><span>あるはずの現金</span><b class="num">${yen(crec.expected)}</b></div><div><span>数えた現金</span><b class="num">${yen(crec.counted)}</b></div><div class="tot"><span>差${crec.memo?'　'+esc(crec.memo):''}</span><b class="num">${crec.diff>0?'+':crec.diff<0?'−':''}${yen(Math.abs(crec.diff||0))}</b></div></div></div>`:''}
     ${BOSS&&k==='day'?`<div class="row" style="margin-top:12px"><button class="btn" data-a="auditlog" data-day="${R.from}">操作の記録を見る（取消・値引きなど）</button>${HP('audit')}</div>`:''}
     ${isToday?`<h2 class="h2">本日の会計履歴（日締め前）</h2>
@@ -706,6 +807,8 @@ async function csvSales(){
 /* ---------- 設定 ---------- */
 function renderSettings(main,force){
   if(main.dataset.view==='settings'&&!force)return;
+  const se=document.scrollingElement,keep=main.dataset.view==='settings'?[main.scrollTop,se?se.scrollTop:0,(main.firstElementChild||{}).scrollTop||0]:null;
+  const ae=document.activeElement,fid=keep&&ae&&ae.id&&main.contains(ae)?ae.id:null,fsel=fid&&ae.selectionStart!=null?[ae.selectionStart,ae.selectionEnd]:null;
   main.dataset.view='settings';
   const secList=[];S.menu.forEach(m=>{if(!secList.find(x=>x.tab===m.tab&&x.sec===m.sec))secList.push({tab:m.tab,sec:m.sec})});
   const reg=S.role==='register';
@@ -730,11 +833,16 @@ function renderSettings(main,force){
       <label>新しいパスワード（6文字以上）<input class="inp" id="mpNew" type="password" autocomplete="new-password"></label></div>
       <p class="lerr" id="mpMsg"></p><div class="row"><button class="btn dark" data-a="changemypass">パスワードを変える</button></div></div>`:''}
     <div class="card"><h3>機械との連動（この端末） ${HP('devices')}</h3><p>レシートのプリンターやドロワーを使う時だけ設定します。使わない時は、そのままで大丈夫です。</p>
-      <h4 class="sh">レシートの出し方</h4><div class="seg wrap">${[['browser','ブラウザの印刷'],['pass','Starのプリンター'],['none','印刷しない']].map(([v,n])=>`<button class="${DEVS.prn===v?'on':''}" data-a="devset" data-k="prn" data-v="${v}">${n}</button>`).join('')}</div>
-      ${DEVS.prn==='pass'?`<p style="margin-top:8px">スター精密のプリンターと、無料アプリ「Star PassPRNT」をこの端末に入れておきます。ドロワーはプリンターにつなぎます。</p>
-      <h4 class="sh">紙の幅</h4><div class="seg">${[[576,'80mm'],[384,'58mm']].map(([v,n])=>`<button class="${+DEVS.paper===v?'on':''}" data-a="devset" data-k="paper" data-v="${v}">${n}</button>`).join('')}</div>
+      <h4 class="sh">レシートの出し方</h4><div class="seg wrap">${PRN.map(([v,n])=>`<button class="${DEVS.prn===v?'on':''}" data-a="devset" data-k="prn" data-v="${v}">${n}</button>`).join('')}</div>
+      ${hasDev()?`<p style="margin-top:8px">${{pass:'スター精密のプリンターと、無料アプリ「Star PassPRNT」をこの端末に入れておきます。',epson:'エプソンのプリンター（TMシリーズ）と、無料アプリ「Epson TM Print Assistant」をこの端末に入れておきます。',sii:'セイコーのプリンターと、無料アプリ「SII URL Print Agent」をこの端末に入れておきます。',rawbt:'Androidの端末で使います。アプリ「RawBT」を入れ、その中でプリンターを選んでおきます。レシートプリンター共通の命令（ESC/POS）に対応した機種で使えます。',direct:'パソコンかAndroidのChromeで使います。アプリは要りません。下の「プリンターを選ぶ」で、つなぐ相手を1回選びます。',relay:'iPadのように、プリンターへ直接つなげない端末で選びます。お店にあるAndroidのスマホかパソコンを1台「プリンター係」にしておくと、この端末の印刷とドロワーを代わりに出します。'}[DEVS.prn]}ドロワーはプリンターにつなぎます。</p>
+      ${DEVS.prn==='relay'?`<p class="stst ${stationAlive()?'ok':''}">${stationAlive()?'プリンター係：つながっています（'+esc(PST.name||'')+'）':'プリンター係の端末が、まだ見つかりません。係にする端末（AndroidかパソコンのChrome）でこのレジを開き、「直接つなぐ（Chrome）」→「この端末をプリンター係にする」を選んでください。'}</p>`:''}
+      ${DEVS.prn==='direct'?`<div class="row" style="margin-top:8px"><button class="btn" data-a="devpick" data-k="serial">プリンターを選ぶ（USB・Bluetooth）</button><button class="btn" data-a="devpick" data-k="ble">プリンターを選ぶ（BLE）</button></div><p style="margin-top:6px;color:var(--muted);font-size:13px">いまのつなぎ方：${DEVS.direct==='ble'?'BLE（ページを開き直すたびに選び直します）':'USB・Bluetooth（1回選べば覚えます）'}</p>
+      ${DEVS.direct!=='ble'?`<h4 class="sh">通信の速さ</h4><div class="seg">${[[9600,'9600'],[19200,'19200'],[38400,'38400'],[115200,'115200']].map(([v,n])=>`<button class="${+DEVS.baud===v?'on':''}" data-a="devset" data-k="baud" data-v="${v}">${n}</button>`).join('')}</div>`:''}`:''}
+      ${DEVS.prn==='direct'?`<h4 class="sh">この端末をプリンター係にする</h4><div class="seg">${[[1,'する'],[0,'しない']].map(([v,n])=>`<button class="${!!DEVS.station===!!v?'on':''}" data-a="devset" data-k="station" data-v="${v}">${n}</button>`).join('')}</div><p style="margin-top:6px;color:var(--muted);font-size:13px">「する」にすると、iPadなどほかの端末のレシートとドロワーも、この端末につないだプリンターから出します。この端末は電源につなぎ、レジの画面を開いたままにしてください。</p>`:''}
+      ${!['epson','relay'].includes(DEVS.prn)?`<h4 class="sh">紙の幅</h4><div class="seg">${[[576,'80mm'],[384,'58mm']].map(([v,n])=>`<button class="${+DEVS.paper===v?'on':''}" data-a="devset" data-k="paper" data-v="${v}">${n}</button>`).join('')}</div>`:''}
       <h4 class="sh">会計が終わったら自動で印刷</h4><div class="seg">${[[1,'する'],[0,'しない']].map(([v,n])=>`<button class="${!!DEVS.auto===!!v?'on':''}" data-a="devset" data-k="autoPrint" data-v="${v}">${n}</button>`).join('')}</div>
       <h4 class="sh">現金の会計でドロワーを開ける</h4><div class="seg">${[[1,'開ける'],[0,'開けない']].map(([v,n])=>`<button class="${!!DEVS.drawer===!!v?'on':''}" data-a="devset" data-k="drawer" data-v="${v}">${n}</button>`).join('')}</div>
+      ${['epson','rawbt','direct'].includes(DEVS.prn)?`<h4 class="sh">ドロワーの信号</h4><div class="seg">${[[0,'ふつう'],[1,'もう一方']].map(([v,n])=>`<button class="${!!DEVS.pin===!!v?'on':''}" data-a="devset" data-k="pin" data-v="${v}">${n}</button>`).join('')}</div><p style="margin-top:6px;color:var(--muted);font-size:13px">「ふつう」で開かない時だけ「もう一方」にします。</p>`:''}
       <div class="row" style="margin-top:12px"><button class="btn" data-a="testprint">テスト印刷</button><button class="btn" data-a="drawer">ドロワーを開ける</button></div>`:''}
       ${S.link.sqApp?`<h4 class="sh">カード端末（Square）との連動</h4><div class="seg">${[[1,'この端末で使う'],[0,'使わない']].map(([v,n])=>`<button class="${!!DEVS.sq===!!v?'on':''}" data-a="devset" data-k="sq" data-v="${v}">${n}</button>`).join('')}</div><p style="margin-top:8px">「使う」にすると、連動する支払い方法で会計した時にSquareのアプリが開きます。この端末にSquareのアプリが入っている必要があります。</p>`:''}
       <p style="margin-top:10px">はじめて使う時は、お客さんの会計の前に、必ず実際の機械で試してください。</p></div>
@@ -775,6 +883,8 @@ function renderSettings(main,force){
         <input class="inp" id="newName" placeholder="品名（期間限定など）" style="flex:1"><input class="inp num" id="newPrice" type="number" inputmode="numeric" placeholder="価格" style="width:100px"></div>
       <div class="row" style="margin-top:12px"><button class="btn dark" data-a="savemenu">メニューを保存</button><button class="btn" data-a="resetmenu">初期メニューに戻す</button></div></div>`:''}
   </div></div>`;
+  if(keep){main.scrollTop=keep[0];if(se)se.scrollTop=keep[1];if(main.firstElementChild)main.firstElementChild.scrollTop=keep[2]}
+  if(fid){const f=document.getElementById(fid);if(f&&f.focus){try{f.focus({preventScroll:true});if(fsel&&f.setSelectionRange)f.setSelectionRange(fsel[0],fsel[1])}catch(e){}}}
 }
 
 function joinUrl(){return location.origin+location.pathname+'?r=staff'}
@@ -911,8 +1021,8 @@ const A={
       <footer><button class="btn" data-a="close">やめる</button><button class="btn pri" data-a="cashiook">記録する</button></footer></div>`)})},
   cashiook(){const a=Math.round(+$('#ioAmt').value||0),memo=$('#ioMemo').value.trim().slice(0,30),sign=IO?IO.sign:1;if(a<=0){toast('金額を入れてください','err');return}
     closeModal();w(Store.set('cashio',uid(),{day:dayOf(Date.now()),at:Date.now(),amt:sign*a,memo,by:who()}),(sign<0?'出金':'入金')+'を記録しました');audit('cashio',(sign<0?'出金 ':'入金 ')+memo,sign*a);
-    if(DEVS.prn==='pass'&&DEVS.drawer)setTimeout(()=>{GO.href=passUrl('',true)},500)},
-  drawer(){needPin('drawer',()=>{audit('drawer','手で開けた');if(DEVS.prn==='pass')GO.href=passUrl('',true);else toast('ドロワーを開けるには、設定の「機械との連動」でStarのプリンターを選んでください','err')})},
+    if(hasDev()&&DEVS.drawer)setTimeout(()=>devOut('',true),500)},
+  drawer(){needPin('drawer',()=>{audit('drawer','手で開けた');if(hasDev())devOut('',true);else toast('ドロワーを開けるには、設定の「機械との連動」でプリンターの種類を選んでください','err')})},
   auditlog(d){loadDayColl('audit',[d.day]).then(list=>{list.sort((a,b)=>a.at-b.at);
     showModal(`<div class="sheet wide"><header><h2>操作の記録　${esc(d.day)}</h2>${HP('audit')}<button class="x" data-a="close" aria-label="閉じる">×</button></header><div class="body">
       ${list.length?`<div class="tblwrap"><table><tr><th>時刻</th><th>操作</th><th>内容</th><th class="r">金額</th><th>担当</th><th>ログイン</th></tr>${list.map(a=>`<tr><td class="num">${hm(a.at)}</td><td>${esc(ACTN[a.act]||a.act)}</td><td style="white-space:normal">${esc(a.txt||'')}</td><td class="r num">${a.amt?yen(a.amt):''}</td><td>${esc(a.by||'')}</td><td>${esc(a.login||'')}</td></tr>`).join('')}</table></div>`:'<p class="empty">この日の記録はありません</p>'}</div>
@@ -948,8 +1058,9 @@ const A={
     if(!list.length){toast('項目を全部消すことはできません。使わない時は「使う」のチェックを外してください','err');return}
     w(Store.set('config','tags',{list}),'記録項目を保存しました').then(()=>render(true))},
   resettags(){confirmBox('初期の項目に戻す','記録項目を最初の状態に戻します。これまでに記録した内容は消えません。','戻す',()=>w(Store.del('config','tags'),'初期の項目に戻しました').then(()=>render(true)))},
-  devset(d){const k=d.k,v=k==='prn'?d.v:k==='paper'?+d.v:d.v==='1';ls.set(k,v);DEVS[k==='autoPrint'?'auto':k]=v;render(true);showStaffNow()},
-  testprint(){GO.href=passUrl('<!doctype html><html><head><meta charset="utf-8"></head><body><pre style="font-size:24px">'+esc(SHOP.name)+'\nテスト印刷\n'+dayOf(Date.now())+' '+hm(Date.now())+'\nこの紙が出れば、プリンターはつながっています。</pre></body></html>',false)},
+  devset(d){const k=d.k,v=k==='prn'?d.v:(k==='paper'||k==='baud')?+d.v:d.v==='1';ls.set(k,v);DEVS[k==='autoPrint'?'auto':k]=v;if(k==='station'||k==='prn')stationBeat();render(true);showStaffNow()},
+  testprint(){devOut(SHOP.name+'\nテスト印刷\n'+dayOf(Date.now())+' '+hm(Date.now())+'\nこの紙が出れば、プリンターは\nつながっています。',false)},
+  async devpick(d){try{if(d.k==='ble'){if(!navigator.bluetooth){toast(DEVERR.nosup,'err');return}BLE=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:BSV})}else{if(!navigator.serial){toast(DEVERR.nosup,'err');return}await navigator.serial.requestPort()}ls.set('direct',d.k);DEVS.direct=d.k;toast('プリンターを選びました。テスト印刷で確かめてください');render(true)}catch(e){toast('プリンターを選べませんでした','err')}},
   txuse(d){S.tax={...S.tax,useTo:d.v==='1'};A.savetax(true)},
   txmode(d){S.tax={...S.tax,mode:d.v};A.savetax(true)},
   savetax(quiet){
@@ -980,7 +1091,7 @@ const A={
     try{await PA.changeMyPassword(ME.auth,$('#mpCur').value,$('#mpNew').value);m.textContent='パスワードを変えました。';$('#mpCur').value='';$('#mpNew').value=''}
     catch(e){m.textContent=PA.msg(e)}btn.disabled=false},
   copyjoin(){const i=$('#joinUrl');i.select();try{navigator.clipboard.writeText(i.value).then(()=>toast('URLをコピーしました'),()=>toast('URLを選択しました。長押しでコピーしてください'))}catch(e){toast('URLを選択しました。長押しでコピーしてください')}},
-  print(){if(DEVS.prn==='pass'&&RCPT){GO.href=passUrl(receiptHtml(RCPT),false);return}try{window.print()}catch(e){}},
+  print(){if(hasDev()&&RCPT){devOut(receiptText(RCPT),false);return}try{window.print()}catch(e){}},
   role(d){S.role=d.r;ls.set('role',d.r);S.soldMode=false;render(true);showStaffNow()},
   savestaff(){S.staff=$('#staffName').value.trim();ls.set('staff',S.staff);toast('担当者名を保存しました')},
   sound(d){S.sound=d.v==='1';ls.set('sound',S.sound);render(true);showStaffNow()},
@@ -1021,6 +1132,9 @@ Store.init().then(()=>{
   Store.sub('cash',a=>{S.cash=a;render()});
   Store.sub('cashio',a=>{S.cashio=a;render()});
   Store.sub('days',a=>{S.days=a;render()});
+  Store.sub('printq',a=>{PQ=a;pqRun();pqSeen()});
+  Store.sub('prnst',a=>{const was=stationAlive();PST=a.find(x=>x.id==='main')||null;if(was!==stationAlive()&&S.tab==='settings'&&DEVS.prn==='relay')render(true)});
+  setTimeout(stationBeat,3000);setInterval(stationBeat,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)stationBeat()});
   Store.sub('wx',a=>{S.wx=a;S.wxReady=true;render()});
   setTimeout(autoWx,8000);setInterval(autoWx,30*60000);
   setTimeout(()=>{if(!BOSS)return;const t=dayOf(Date.now()),n=[...S.tax.red].sort((a,b)=>a.from<b.from?-1:1).find(x=>x.from>t);if(n&&(dparse(n.from)-dparse(t))/86400000<=45)toast(n.from+' から、持ち帰りの税率が '+n.rate+'％ に変わる予定です。設定の「税と価格」で確認してください','new')},6000);
