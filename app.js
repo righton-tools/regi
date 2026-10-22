@@ -121,7 +121,7 @@ const DEV=ls.get('dev',null)||(()=>{const d=uid();ls.set('dev',d);return d})();
 const S={
   role:ls.get('role',null)||(['staff','register'].includes(QS.get('r'))?QS.get('r'):window.innerWidth>=900?'register':'staff'),
   tab:'order',cat:TABS[0][0],seat:null,soldMode:false,
-  staff:ls.get('staff',''),sound:ls.get('sound',true),
+  staff:ls.get('staff',''),sound:ls.get('sound',null),sndKind:ls.get('sndKind','chime'),sndRep:ls.get('sndRep','0'),
   orders:[],sales:[],days:[],wx:[],cash:[],cashio:[],toMode:{},tax:DEFAULT_TAX,guard:null,link:{sqApp:'',map:{}},fee:{},tags:DEFAULT_TAGS,per:{k:'day',off:0},menu:DEFAULT_MENU,seats:DEFAULT_SEATS,sold:[],
   drafts:ls.get('drafts',{}),customMenu:false
 };
@@ -139,23 +139,38 @@ const who=()=>S.staff||(S.role==='register'?'レジ':'スタッフ');
 
 /* ---------- 通知 ---------- */
 let actx=null;
-function beep(){
-  if(!S.sound)return;
-  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();
-    [[880,0],[1175,.16],[1568,.32]].forEach(([f,t])=>{const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;o.type='sine';
-      g.gain.setValueAtTime(.0001,actx.currentTime+t);g.gain.exponentialRampToValueAtTime(.35,actx.currentTime+t+.02);g.gain.exponentialRampToValueAtTime(.0001,actx.currentTime+t+.3);
-      o.connect(g).connect(actx.destination);o.start(actx.currentTime+t);o.stop(actx.currentTime+t+.32)});
+const SND={chime:'チャイム',pinpon:'ピンポン',bell:'ベル',buzz:'ブザー',pop:'ポン'};
+const SNDREP={'0':'1回だけ','5':'5秒おき','15':'15秒おき','60':'1分おき','2':'鳴り続ける'};
+const soundOn=()=>S.sound==null?S.role==='register':!!S.sound;
+function beep(kind){
+  if(!soundOn()&&!kind)return;kind=kind||S.sndKind;
+  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();const T=actx.currentTime;
+    const tone=(f,t,d,type,v)=>{const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;o.type=type||'sine';
+      g.gain.setValueAtTime(.0001,T+t);g.gain.exponentialRampToValueAtTime(v||.35,T+t+.02);g.gain.exponentialRampToValueAtTime(.0001,T+t+d);
+      o.connect(g).connect(actx.destination);o.start(T+t);o.stop(T+t+d+.02)};
+    if(kind==='pinpon'){tone(1047,0,.5);tone(784,.35,.7)}
+    else if(kind==='bell'){[0,.22,.44].forEach(t=>{tone(2093,t,.35,'sine',.3);tone(2637,t,.25,'sine',.12)})}
+    else if(kind==='buzz'){tone(220,0,.28,'square',.18);tone(220,.4,.28,'square',.18)}
+    else if(kind==='pop'){tone(660,0,.14,'triangle',.4)}
+    else{[[880,0],[1175,.16],[1568,.32]].forEach(([f,t])=>tone(f,t,.3))}
   }catch(e){}
 }
+let lastBeep=0;
+function alarmTick(){
+  if(!soundOn()||S.sndRep==='0')return;
+  const sec=+S.sndRep;if(!S.orders.some(o=>o.status==='new'&&!o.hold&&o.dev!==DEV))return;
+  if(Date.now()-lastBeep>=sec*1000){lastBeep=Date.now();beep()}
+}
+setInterval(alarmTick,1000);
 function toast(msg,type){
   const d=document.createElement('div');d.className='toast '+(type||'');d.textContent=msg;$('#toasts').appendChild(d);
   setTimeout(()=>d.remove(),type==='new'?9000:3500);
 }
 let known=null;
 function detectNew(arr){
-  if(known&&S.role==='register'){
+  if(known&&soundOn()){
     const fresh=arr.filter(o=>!known.has(o.id)&&o.dev!==DEV&&o.status==='new');
-    if(fresh.length){beep();fresh.forEach(o=>toast('新しい注文 '+o.seat+'：'+(o.lines||[]).map(l=>l.name+'×'+l.qty).join('、'),'new'))}
+    if(fresh.length){beep();lastBeep=Date.now();fresh.forEach(o=>toast('新しい注文 '+o.seat+'：'+(o.lines||[]).map(l=>l.name+'×'+l.qty).join('、'),'new'))}
   }
   known=new Set(arr.map(o=>o.id));
 }
@@ -828,8 +843,12 @@ function renderSettings(main,force){
     <div class="card"><h3>この端末の役割 ${HP('role')}</h3><p>レジに置くタブレットは「メインレジ」、注文を取りに行くスマホは「スタッフ端末」にします。「売上」は、メインレジ＋店長のIDの時だけ出ます。</p>
       <div class="seg"><button class="${reg?'on':''}" data-a="role" data-r="register">メインレジ</button><button class="${reg?'':'on'}" data-a="role" data-r="staff">スタッフ端末</button></div></div>
     <div class="card"><h3>担当者名 ${HP('staffname')}</h3><p>注文に「誰が取ったか」が残ります。</p><div class="row"><input class="inp" id="staffName" value="${esc(S.staff)}" placeholder="例：たなか" maxlength="12"><button class="btn" data-a="savestaff">保存</button></div></div>
-    <div class="card"><h3>新しい注文の通知音 ${HP('sound')}</h3><p>メインレジで、スタッフ端末から注文が届いた時に鳴ります。</p>
-      <div class="row"><div class="seg"><button class="${S.sound?'on':''}" data-a="sound" data-v="1">鳴らす</button><button class="${S.sound?'':'on'}" data-a="sound" data-v="0">鳴らさない</button></div><button class="btn" data-a="testbeep">音を試す</button></div></div>
+    <div class="card"><h3>新しい注文の通知音 ${HP('sound')}</h3><p>ほかの端末から注文が届いた時に、この端末で鳴ります。厨房で使う端末は「鳴らす」にしてください。</p>
+      <div class="row"><div class="seg"><button class="${soundOn()?'on':''}" data-a="sound" data-v="1">鳴らす</button><button class="${soundOn()?'':'on'}" data-a="sound" data-v="0">鳴らさない</button></div></div>
+      <h4 class="sh">音の種類</h4><div class="row" style="flex-wrap:wrap;gap:6px">${Object.entries(SND).map(([k,n])=>`<button class="chip ${S.sndKind===k?'on':''}" data-a="sndkind" data-k="${k}">${n}</button>`).join('')}<button class="btn" data-a="testbeep">音を試す</button></div>
+      <h4 class="sh">繰り返し</h4><p>厨房のオーダー画面で「確認した（調理へ）」を押すまで、選んだ間隔で鳴らし続けます。</p>
+      <div class="seg">${Object.entries(SNDREP).map(([k,n])=>`<button class="${S.sndRep===k?'on':''}" data-a="sndrep" data-k="${k}">${n}</button>`).join('')}</div>
+      ${S.sndRep!=='0'?'<p class="hint">画面が消えると音は鳴りません。厨房の端末は画面を点けたままにしてください。</p>':''}</div>
     <div class="card"><h3>連動の状態 ${HP('sync')}</h3><p>${ME.demo?'本番では、同じお店にログインしている全部の端末で、注文・会計・売切がすぐに共有されます（このデモは、この画面の中だけで動いています）。':Store.mode==='fb'?(Store.online?'連動中です。同じお店にログインしている全端末で、注文・会計・売切がすぐに共有されます。':'いまは電波待ちです。入力した内容はこの画面を開いたままにしておけば、電波が戻った時に自動で送られます。'):Store.mode==='db'?'連動中です。同じページを開いている全端末で、注文・会計・売切がすぐに共有されます。':Store.failed?'連動の準備に失敗しました。電波を確認して画面を開き直してください。いまの入力はこの端末の中だけに保存されます。':Store.mode==='local'?'店舗キーなしで開いているため、この端末の中だけに保存するお試しモードです（他の端末とは連動しません）。':'接続を確認しています…'}</p>
       ${Store.mode==='fb'&&!ME.demo?`<h3 style="margin-top:14px">端末を追加する</h3><p>追加したいスマホやタブレットのカメラでこのQRを読み、スタッフ用のIDとパスワードでログインします。</p>
       <div class="row" style="align-items:flex-start"><div class="qr">${qrSvg(joinUrl())}</div><div style="flex:1;min-width:200px"><input class="inp" id="joinUrl" readonly value="${esc(joinUrl())}" style="width:100%"><div class="row" style="margin-top:8px"><button class="btn" data-a="copyjoin">URLをコピー</button></div></div></div>`:''}</div>
@@ -1099,7 +1118,9 @@ const A={
   role(d){S.role=d.r;ls.set('role',d.r);S.soldMode=false;render(true);showStaffNow()},
   savestaff(){S.staff=$('#staffName').value.trim();ls.set('staff',S.staff);toast('担当者名を保存しました')},
   sound(d){S.sound=d.v==='1';ls.set('sound',S.sound);render(true);showStaffNow()},
-  testbeep(){const s=S.sound;S.sound=true;beep();S.sound=s},
+  testbeep(){beep(S.sndKind)},
+  sndkind(d){S.sndKind=d.k;ls.set('sndKind',d.k);beep(d.k);render(true)},
+  sndrep(d){S.sndRep=d.k;ls.set('sndRep',d.k);render(true)},
   saveseats(){const list=[...new Set($('#seatText').value.split('\n').map(x=>x.trim().slice(0,16)).filter(Boolean))];
     if(!list.length){toast('席を1つ以上入力してください','err');return}w(Store.set('config','seats',{list}),'席を保存しました')},
   savemenu(){
