@@ -932,7 +932,7 @@ const A={
     const m=item(d.id);if(!m)return;
     if(S.soldMode){const ids=S.sold.includes(m.id)?S.sold.filter(x=>x!==m.id):[...S.sold,m.id];S.sold=ids;render();w(Store.set('config','sold',{ids}));return}
     if(S.sold.includes(m.id)){toast('「'+m.name+'」は売切です');return}
-    if(m.mods.some(g=>GROUPS[g].type==='req')){openItem(m.id);return}
+    if(FLOW.sheetAlways||m.mods.some(g=>GROUPS[g].type==='req')){openItem(m.id);return}
     const to=curTo(),dr=draft(),l=dr.find(l=>l.mid===m.id&&!l.mods.length&&!l.note&&!!l.to===to);
     if(l)l.qty++;else dr.push({k:uid(),mid:m.id,name:m.name,base:m.price,mods:[],note:'',qty:1,to});
     saveDrafts();render();
