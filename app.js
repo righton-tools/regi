@@ -40,7 +40,7 @@ const SHOP={name:CFG.name,addr:CFG.addr||'',tel:CFG.tel||''};
 const TABS=CFG.tabs,GROUPS=CFG.groups||{},DEFAULT_MENU=(CFG.menu||[]).flatMap(g=>g.items?g.items.map(it=>({id:it[0],tab:g.tab,sec:g.sec,name:it[1],price:it[2],mods:it[3]||g.mods||[]})):[{...g,mods:g.mods||[]}]),DEFAULT_SEATS=CFG.seats;
 const TAX=CFG.taxRate==null?10:CFG.taxRate,taxOf=(t,r)=>Math.floor(t*r/(100+r));
 const rateFor=seat=>(CFG.takeoutWords||['テイクアウト','持ち帰り']).some(w=>String(seat).includes(w))?(CFG.takeoutTaxRate==null?8:CFG.takeoutTaxRate):TAX;
-const METHODS=CFG.payments,METHOD={mixed:'併用',...Object.fromEntries(METHODS.map(m=>[m.id,m.name]))},isCash=id=>!!(METHODS.find(m=>m.id===id)||{}).cash;
+const METHODS=CFG.payments,manualMethods=()=>METHODS.filter(m=>!m.auto&&!(m.id==='uber'&&S.uberLive)),METHOD={mixed:'併用',...Object.fromEntries(METHODS.map(m=>[m.id,m.name]))},isCash=id=>!!(METHODS.find(m=>m.id===id)||{}).cash;
 const secTime=n=>{const w=(CFG.timeSections||[]).find(x=>x.sec===n);if(!w)return '';const d=new Date(),m=d.getHours()*60+d.getMinutes(),t=x=>+x.split(':')[0]*60+ +x.split(':')[1];
   return `<em>${w.from}〜${w.to}${m>=t(w.from)&&m<=t(w.to)?'':'（時間外）'}</em>`};
 const ST={new:'新着',cooking:'調理中',served:'提供済'};
@@ -121,7 +121,7 @@ const DEV=ls.get('dev',null)||(()=>{const d=uid();ls.set('dev',d);return d})();
 const S={
   role:ls.get('role',null)||(['staff','register'].includes(QS.get('r'))?QS.get('r'):window.innerWidth>=900?'register':'staff'),
   tab:'order',cat:TABS[0][0],seat:null,soldMode:false,
-  staff:ls.get('staff',''),sound:ls.get('sound',null),sndKind:ls.get('sndKind','chime'),sndRep:ls.get('sndRep','0'),
+  staff:ls.get('staff',''),sound:ls.get('sound',null),uberLive:false,sndKind:ls.get('sndKind','chime'),sndRep:ls.get('sndRep','0'),
   orders:[],sales:[],days:[],wx:[],cash:[],cashio:[],toMode:{},tax:DEFAULT_TAX,guard:null,link:{sqApp:'',map:{}},fee:{},tags:DEFAULT_TAGS,per:{k:'day',off:0},menu:DEFAULT_MENU,seats:DEFAULT_SEATS,sold:[],
   drafts:ls.get('drafts',{}),customMenu:false
 };
@@ -298,7 +298,7 @@ function payGroups(os){
 }
 function openPay(){
   const os=openOrders(S.seat);if(!os.length)return;const groups=payGroups(os);if(!groups.length)return;
-  const m0=METHODS[0].id;
+  const m0=manualMethods()[0].id;
   P={seat:S.seat,groups,mode:'all',sel:{},splitN:2,discMode:'yen',discVal:0,okDisc:false,pays:[],method:m0,amt:null,recv:0,field:isCash(m0)?'recv':'',busy:false,tags:{},notes:{}};
   renderPay();
 }
@@ -335,7 +335,7 @@ function renderPay(){
       ${locked?`<div class="paid">${P.pays.map((p,i)=>`<div><span>受け取り済み ${i+1}：${esc(METHOD[p.m]||p.m)}</span><span class="num">${yen(p.amt)}</span></div>`).join('')}<div class="rem"><span>残り</span><b class="num">${yen(C.remain)}</b></div>${P.pays.some(p=>p.ext)?'':'<button class="mini" data-a="payreset">受け取りをやり直す</button>'}</div>`:''}
       ${tf?`<div class="ptags"><h3>お客様の記録 <small>任意です。押さなくても会計できます</small> ${HP('tags')}</h3><div class="ptg">${tf}</div></div>`:''}</div>
     <div>${step(2,'支払い方法')}
-      <div class="seg" style="width:100%">${METHODS.map(m=>`<button style="flex:1" class="${P.method===m.id?'on':''}" data-a="method" data-m="${m.id}">${esc(m.name)}</button>`).join('')}</div>
+      <div class="seg" style="width:100%">${manualMethods().map(m=>`<button style="flex:1" class="${P.method===m.id?'on':''}" data-a="method" data-m="${m.id}">${esc(m.name)}</button>`).join('')}</div>
       <div class="pstep"><b>3</b>${cash?'お預かり':'支払いの確認'}${P.mode!=='split'&&P.amt==null&&P.field!=='amt'?'<button class="mini pamt" data-a="field" data-f="amt">一部だけ受け取る</button>':''}</div>
       ${P.mode!=='split'&&P.amt==null&&P.field!=='amt'?'':P.mode==='split'?`<div class="fld"><span>今回の金額（${Math.min(P.pays.length+1,P.splitN)}人目／${P.splitN}人）</span><b class="num">${yen(C.amt)}</b></div>`
         :`<button class="fld ${P.field==='amt'?'on':''}" data-a="field" data-f="amt"><span>今回の金額<small>　数字で入れます</small></span><b class="num">${yen(C.amt)}</b></button>`}
@@ -897,7 +897,7 @@ function renderSettings(main,force){
       <p class="lerr" id="pinMsg"></p><div class="row"><button class="btn dark" data-a="savepin">保存</button>${S.guard&&S.guard.hash?'<button class="btn" data-a="clearpin">暗証番号をなくす</button>':''}</div></div>
     <div class="card"><h3>カード端末との連動（Square） ${HP('sqlink')}</h3><p>Squareのカード端末を使っている店だけ設定します。会計の金額がSquareのアプリに自動で渡り、打ち間違いがなくなります。使わない時は空のままで大丈夫です。</p>
       <div class="lgrid"><label>SquareのアプリID<input class="inp" id="sqApp" value="${esc(S.link.sqApp||'')}" placeholder="sq0idp-..." autocapitalize="none" spellcheck="false"></label></div>
-      <h4 class="sh">連動する支払い方法</h4>${METHODS.filter(m=>!m.cash).map(m=>`<div class="row" style="margin-top:6px"><span style="min-width:90px">${esc(m.name)}</span><select class="inp" id="sqM_${m.id}">${[['','連動しない'],['CREDIT_CARD','カード'],['PAYPAY','PayPay'],['OTHER','その他']].map(([v,n])=>`<option value="${v}" ${(S.link.map||{})[m.id]===v?'selected':''}>${n}</option>`).join('')}</select></div>`).join('')}
+      <h4 class="sh">連動する支払い方法</h4>${manualMethods().filter(m=>!m.cash).map(m=>`<div class="row" style="margin-top:6px"><span style="min-width:90px">${esc(m.name)}</span><select class="inp" id="sqM_${m.id}">${[['','連動しない'],['CREDIT_CARD','カード'],['PAYPAY','PayPay'],['OTHER','その他']].map(([v,n])=>`<option value="${v}" ${(S.link.map||{})[m.id]===v?'selected':''}>${n}</option>`).join('')}</select></div>`).join('')}
       <p style="margin-top:8px">Squareの開発者ページで、戻り先（Web Callback URL）にこのアドレスを登録します：<br><b style="word-break:break-all">${esc(selfUrl())}</b></p>
       <div class="row" style="margin-top:12px"><button class="btn dark" data-a="savelink">連動の設定を保存</button></div></div>`:''}
     ${BOSS?`<div class="card"><h3>会計のときの記録項目 ${HP('tagset')}</h3><p>会計の画面に出す「お客様の記録」です。使うものにチェックを入れます。押さなくても会計はできます。選択肢は「、」で区切って書きます。名前を空にすると、その項目は消えます。</p>
@@ -1166,7 +1166,7 @@ Store.init().then(()=>{
   Store.sub('config',a=>{
     const g=id=>a.find(x=>x.id===id);
     const mn=g('menu'),st=g('seats'),sd=g('sold'),tg=g('tags'),tx=g('tax'),gd=g('guard'),lk=g('link'),fe=g('fee');
-    S.fee=fe&&fe.rates?fe.rates:{};
+    S.fee=fe&&fe.rates?fe.rates:{};const ub=g('uber');S.uberLive=!!(ub&&ub.live);
     S.tax=tx&&Array.isArray(tx.red)&&tx.red.length?{std:tx.std==null?DEFAULT_TAX.std:tx.std,red:tx.red,mode:tx.mode==='base'?'base':'same',inv:tx.inv||'',useTo:tx.useTo!==false}:DEFAULT_TAX;
     S.guard=gd&&gd.hash?{hash:gd.hash,acts:gd.acts||{}}:null;
     S.link=lk&&lk.sqApp?{sqApp:lk.sqApp,map:lk.map||{}}:{sqApp:'',map:{}};
