@@ -88,7 +88,7 @@ main{flex:1;min-height:0;position:relative}
 .cbody{flex:1;overflow-y:auto;padding:8px 16px}
 .round{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;margin:12px 0 4px}
 .st{font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap}
-.st.new{background:var(--shu);color:var(--shu-ink)}.st.cooking{background:var(--warn-soft);color:var(--warn)}.st.served{background:var(--ok-soft);color:var(--ok)}
+.st.new{background:var(--shu);color:var(--shu-ink)}.st.cooking{background:var(--warn-soft);color:var(--warn)}.st.served{background:var(--ok-soft);color:var(--ok)}.st.hold{background:#f3e3a6;color:#5a4200}
 .ln{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:8px 0;border-bottom:1px dashed var(--line)}
 .ln .nm{font-weight:700}
 .ln .sub{grid-column:1/-1;font-size:12.5px;color:var(--muted)}

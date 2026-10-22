@@ -56,6 +56,7 @@ const DEFAULT_TAGS=(CFG.tags||[
   {id:'memo',name:'ひとことメモ',type:'text',on:false}]).map(t=>({...t,opts:t.opts||[]}));
 const TAGTYPE={one:'1つ選ぶ',multi:'いくつでも選ぶ',num:'数を入れる',text:'文字で書く'};
 const WXC=CFG.weather||{office:'400000',area:'400010',amedas:'82182'};
+const FLOW=CFG.flow||{};const payFirst=()=>!!FLOW.payFirst&&S.role==='register';
 const WX=['晴れ','くもり','雨','雪'],DOW=['日','月','火','水','木','金','土'];
 /* ---------- 税率（店内＝標準、持ち帰り＝軽減。変わる日は予定表で持つ）・暗証番号・機械 ---------- */
 const DEFAULT_TAX={std:CFG.taxRate==null?10:CFG.taxRate,
@@ -161,7 +162,7 @@ function detectNew(arr){
 
 /* ---------- 画面：上部バー ---------- */
 function renderBar(){
-  const nNew=S.orders.filter(o=>o.status==='new').length;
+  const nNew=S.orders.filter(o=>o.status==='new'&&!o.hold).length;
   const reg=S.role==='register',tabs=[['order',reg?'注文・会計':'注文'],['feed','オーダー']].concat(canSales()?[['sales','売上']]:[],[['settings','設定']]);
   $('#tabs').innerHTML=tabs.map(([k,n])=>`<button class="tab ${S.tab===k?'on':''}" data-a="tab" data-t="${k}">${n}${k==='feed'&&nNew?`<span class="badge num">${nNew}</span>`:''}</button>`).join('');
   const live=Store.mode==='db'||(Store.mode==='fb'&&Store.online);
@@ -198,7 +199,7 @@ function renderCheck(){
     ${useTo?`<div class="tomode"><div class="seg"><button class="${to?'':'on'}" data-a="tomode" data-v="0">店内で食べる</button><button class="${to?'on':''}" data-a="tomode" data-v="1">持ち帰り</button></div>${HP('tomode')}</div>`:''}<div class="cbody">`;
   if(!os.length&&!d.length)h+=`<p class="empty">まだ注文がありません。<br>メニューをタップして追加してください。</p>`;
   os.forEach(o=>{
-    h+=`<div class="round"><span class="num">${hm(o.at)}</span><span>${esc(o.by||'')}</span><span class="st ${o.status}">${ST[o.status]||''}</span></div>`;
+    h+=`<div class="round"><span class="num">${hm(o.at)}</span><span>${esc(o.by||'')}</span>${o.hold?'<span class="st hold">会計待ち</span>':`<span class="st ${o.status}">${ST[o.status]||''}</span>`}</div>`;
     (o.lines||[]).forEach(l=>{const rem=remOf(l);h+=`<div class="ln ${rem?'':'paidln'}"><span class="nm">${esc(l.name)} ×${l.qty}${tb(l)}</span><span class="num">${yen(l.unit*rem)}</span>
       ${(l.mods&&l.mods.length)||l.note||l.pq?`<span class="sub">${esc([...(l.mods||[]),l.note,l.pq?(rem?'うち'+l.pq+'点は会計済み':'会計済み'):''].filter(Boolean).join(' ／ '))}</span>`:''}
       ${reg&&rem?`<span class="ops"><button class="mini danger" data-a="cancelline" data-id="${o.id}" data-k="${l.k}">1点取消</button>${useTo&&!l.pq?`<button class="mini" data-a="lineto" data-id="${o.id}" data-k="${l.k}">${l.to?'店内に変える':'持ち帰りに変える'}</button>`:''}</span>`:''}</div>`});
@@ -211,8 +212,10 @@ function renderCheck(){
       <button class="mini" data-a="editline" data-k="${l.k}">変更・メモ</button></span></div>`});
   }
   h+=`</div><div class="cfoot"><div class="tot"><small>合計（税込）${dsum?`<br>うち未送信 ${yen(dsum)}`:''}</small><b class="num">${yen(sent+dsum)}</b></div>`;
-  if(d.length)h+=`<button class="btn pri" data-a="send">注文を送信（${d.reduce((a,l)=>a+l.qty,0)}点）</button>`;
-  if(reg)h+=`<button class="btn dark" data-a="pay" ${!os.length||d.length?'disabled':''}>会計へ進む</button>${d.length&&os.length?'<p class="hint">未送信の注文を送信すると会計できます</p>':''}`;
+  const pf=payFirst();
+  if(d.length&&!pf)h+=`<button class="btn pri" data-a="send">注文を送信（${d.reduce((a,l)=>a+l.qty,0)}点）</button>`;
+  if(reg)h+=pf?`<button class="btn pri" data-a="pay" ${!os.length&&!d.length?'disabled':''}>会計へ進む${d.length?'（'+d.reduce((a,l)=>a+l.qty,0)+'点）':''}</button><p class="hint">会計が終わると、注文が厨房に送られます</p>`
+    :`<button class="btn dark" data-a="pay" ${!os.length||d.length?'disabled':''}>会計へ進む</button>${d.length&&os.length?'<p class="hint">未送信の注文を送信すると会計できます</p>':''}`;
   h+='</div>';
   $('#check').innerHTML=h;
   const n=d.reduce((a,l)=>a+l.qty,0);
@@ -350,6 +353,15 @@ function addPay(ext){
   P.pays.push(p);P.amt=null;P.recv=0;P.field=isCash(P.method)?'recv':'';
   return C.last;
 }
+async function sendDraft(hold){
+  const d=draft();if(!d.length)return false;
+  const seat=S.seat,now=Date.now(),id=uid();
+  const o={seat,lines:d.map(l=>{const m=item(l.mid);return {k:l.k,mid:l.mid,name:l.name,unit:unitOf(l),qty:l.qty,mods:l.mods.map(x=>x.n),note:l.note,done:false,to:!!l.to,r:rateOf(m,l.to),c:(m&&m.cost)||0}}),
+    status:hold?'new':(S.role==='register'?'cooking':'new'),hold:!!hold,src:S.role,by:who(),dev:DEV,at:now,day:dayOf(now),paid:false};
+  S.drafts[seat]=[];saveDrafts();render();
+  if(await w(Store.set('orders',id,o),hold?'':seat+'の注文を送信しました')){if(!hold)A.hidecheck&&$('#orderRoot')&&$('#orderRoot').classList.remove('showcheck');if(!S.orders.find(x=>x.id===id))S.orders=[...S.orders,{...o,id}];return id}
+  S.drafts[seat]=d;saveDrafts();render();return false;
+}
 function payGo(){
   if(P.busy)return;const C=payCalc(),sq=sqTender(P.method);
   if(sq&&C.amt>0){sqLaunch(C.amt,sq);return}
@@ -370,7 +382,7 @@ async function confirmPay(){
   if(!await w(Store.set('sales',id,sale))){P.busy=false;renderPay();return}
   for(const oid of sale.orderIds){const o=S.orders.find(x=>x.id===oid);if(!o)continue;
     const ln=o.lines.map(x=>{const q=parts.filter(p=>p.oid===oid&&p.k===x.k).reduce((a,p)=>a+p.q,0);return q?{...x,pq:(x.pq||0)+q}:{...x}});
-    await w(Store.update('orders',oid,{lines:ln,paid:ln.every(x=>(x.pq||0)>=x.qty),saleId:id}))}
+    await w(Store.update('orders',oid,{lines:ln,paid:ln.every(x=>(x.pq||0)>=x.qty),saleId:id,...(o.hold?{hold:false,status:'new',at:now}:{})}))}
   if(C.disc)audit('disc','No.'+no+' '+P.seat+(P.discMode==='pct'?'（'+P.discVal+'％）':''),C.disc);
   const rest=P.groups.some(g=>g.rem-((C.lines.find(l=>l.key===g.key)||{}).qty||0)>0);
   P=null;showDone({...sale,id},rest);
@@ -561,7 +573,7 @@ function renderTagEdit(){
 /* ---------- オーダー一覧 ---------- */
 function renderFeed(main){
   main.dataset.view='feed';
-  const os=S.orders.filter(o=>o.status!=='served').sort((a,b)=>(a.status==='new'?0:1)-(b.status==='new'?0:1)||a.at-b.at);
+  const os=S.orders.filter(o=>o.status!=='served'&&!o.hold).sort((a,b)=>(a.status==='new'?0:1)-(b.status==='new'?0:1)||a.at-b.at);
   const now=Date.now();
   main.innerHTML=`<div class="view"><h1 class="h1">未提供のオーダー <span class="badge num">${os.length}</span></h1>
     ${os.length?`<div class="feed">${os.map(o=>{const min=Math.floor((now-o.at)/60000);return `<article class="tk ${o.status}"><header><b>${esc(o.seat)}</b><span class="num ${min>=10?'late':''}">${hm(o.at)}・${min}分前</span><span class="st ${o.status}">${ST[o.status]}</span></header>
@@ -944,15 +956,7 @@ const A={
   xdel(){const dr=draft(),i=dr.findIndex(l=>l.k===X.k);if(i>=0)dr.splice(i,1);saveDrafts();closeModal();render()},
   close(){closeModal()},
   cok(){const f=confirmFn;confirmFn=null;closeModal();f&&f()},
-  async send(){
-    const d=draft();if(!d.length)return;
-    const seat=S.seat,now=Date.now();
-    const o={seat,lines:d.map(l=>{const m=item(l.mid);return {k:l.k,mid:l.mid,name:l.name,unit:unitOf(l),qty:l.qty,mods:l.mods.map(x=>x.n),note:l.note,done:false,to:!!l.to,r:rateOf(m,l.to),c:(m&&m.cost)||0}}),
-      status:S.role==='register'?'cooking':'new',src:S.role,by:who(),dev:DEV,at:now,day:dayOf(now),paid:false};
-    S.drafts[seat]=[];saveDrafts();render();
-    if(await w(Store.set('orders',uid(),o),seat+'の注文を送信しました'))A.hidecheck&&$('#orderRoot')&&$('#orderRoot').classList.remove('showcheck');
-    else{S.drafts[seat]=d;saveDrafts();render()}
-  },
+  async send(){await sendDraft(false)},
   cancelline(d){
     const o=S.orders.find(o=>o.id===d.id);if(!o)return;const l=o.lines.find(l=>l.k===d.k);if(!l||!remOf(l))return;
     confirmBox('注文の取消','「'+l.name+'」を1点取り消します。よろしいですか？','取り消す',()=>needPin('cancel',()=>{
@@ -966,7 +970,7 @@ const A={
     const to=!l.to,nr=rateOf(item(l.mid),to),or=l.r==null?S.tax.std:l.r,unit=S.tax.mode==='base'&&nr!==or?Math.round(l.unit/(100+or)*(100+nr)):l.unit;
     w(Store.update('orders',o.id,{lines:o.lines.map(x=>x.k===d.k?{...x,to,r:nr,unit}:{...x})}),'「'+l.name+'」を'+(to?'持ち帰り':'店内')+'に変えました');
     audit('toggle',o.seat+' '+l.name+' → '+(to?'持ち帰り':'店内'))},
-  pay(){openPay()},
+  async pay(){if(payFirst()&&draft().length){if(!await sendDraft(true))return}openPay()},
   field(d){if(d.f==='disc'&&!P.okDisc){needPin('disc',()=>{P.okDisc=true;P.field='disc';renderPay()});return}
     if(d.f==='amt'&&P.amt==null)P.amt=0;
     P.field=d.f;renderPay()},
@@ -1127,7 +1131,7 @@ Store.init().then(()=>{
   if(Store.failed)toast('連動できませんでした。電波を確認して開き直してください','err');
   try{if(document.querySelector('link[rel=manifest]')&&'serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}
   const ready={};const got=k=>{ready[k]=1;if(ready.o&&ready.s)resumeRet()};
-  Store.sub('orders',a=>{detectNew(a);S.orders=a;render();got('o')});
+  Store.sub('orders',a=>{detectNew(a.filter(o=>!o.hold));S.orders=a;render();got('o')});
   Store.sub('sales',a=>{S.sales=a;render();got('s')});
   Store.sub('cash',a=>{S.cash=a;render()});
   Store.sub('cashio',a=>{S.cashio=a;render()});
