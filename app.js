@@ -56,7 +56,7 @@ const DEFAULT_TAGS=(CFG.tags||[
   {id:'memo',name:'ひとことメモ',type:'text',on:false}]).map(t=>({...t,opts:t.opts||[]}));
 const TAGTYPE={one:'1つ選ぶ',multi:'いくつでも選ぶ',num:'数を入れる',text:'文字で書く'};
 const WXC=CFG.weather||{office:'400000',area:'400010',amedas:'82182'};
-const FLOW=CFG.flow||{};const payFirst=()=>!!FLOW.payFirst&&S.role==='register';
+const FLOW=CFG.flow||{};const FN_BASE=CFG.fnBase||'https://asia-northeast1-shura-pos-314e4.cloudfunctions.net';const payFirst=()=>!!FLOW.payFirst&&S.role==='register';
 const WX=['晴れ','くもり','雨','雪'],DOW=['日','月','火','水','木','金','土'];
 /* ---------- 税率（店内＝標準、持ち帰り＝軽減。変わる日は予定表で持つ）・暗証番号・機械 ---------- */
 const DEFAULT_TAX={std:CFG.taxRate==null?10:CFG.taxRate,
@@ -121,7 +121,7 @@ const DEV=ls.get('dev',null)||(()=>{const d=uid();ls.set('dev',d);return d})();
 const S={
   role:ls.get('role',null)||(['staff','register'].includes(QS.get('r'))?QS.get('r'):window.innerWidth>=900?'register':'staff'),
   tab:'order',cat:TABS[0][0],seat:null,soldMode:false,
-  staff:ls.get('staff',''),sound:ls.get('sound',null),uberLive:false,sndKind:ls.get('sndKind','chime'),sndRep:ls.get('sndRep','0'),
+  staff:ls.get('staff',''),sound:ls.get('sound',null),uberLive:false,uber:null,sndKind:ls.get('sndKind','chime'),sndRep:ls.get('sndRep','0'),
   orders:[],sales:[],days:[],wx:[],cash:[],cashio:[],toMode:{},tax:DEFAULT_TAX,guard:null,link:{sqApp:'',map:{}},fee:{},tags:DEFAULT_TAGS,per:{k:'day',off:0},menu:DEFAULT_MENU,seats:DEFAULT_SEATS,sold:[],
   drafts:ls.get('drafts',{}),customMenu:false
 };
@@ -895,6 +895,9 @@ function renderSettings(main,force){
       <div class="lgrid"><label>新しい暗証番号（数字4〜8けた）<input class="inp" id="pinNew" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label></div>
       <h4 class="sh">暗証番号を聞く操作</h4>${GUARDS.map(([k,n])=>`<label class="tck"><input type="checkbox" id="pg_${k}" ${S.guard&&S.guard.acts?(S.guard.acts[k]?'checked':''):(['void','disc','cancel','cashio','drawer'].includes(k)?'checked':'')}>${n}</label>`).join('')}
       <p class="lerr" id="pinMsg"></p><div class="row"><button class="btn dark" data-a="savepin">保存</button>${S.guard&&S.guard.hash?'<button class="btn" data-a="clearpin">暗証番号をなくす</button>':''}</div></div>
+    <div class="card"><h3>Uber Eats との連動 ${HP('uberlink')}</h3><p>つなぐと、Uber Eatsの注文が自動でオーダー画面に出て、売上に「Uber Eats」として記録されます。店のUber Eatsマネージャーのアカウントでログインして「許可」を押すだけです。</p>
+      ${S.uberLive?`<p class="hint" style="color:var(--ok)">連動中：${esc((S.uber||{}).name||'')}</p><div class="row"><button class="btn" data-a="uberoff">連動を外す</button></div>`
+        :`<div class="row"><button class="btn pri" data-a="uberon">Uber Eats とつなぐ</button></div>${ME.demo?'<p class="hint">（デモでは動きません）</p>':''}`}</div>
     <div class="card"><h3>カード端末との連動（Square） ${HP('sqlink')}</h3><p>Squareのカード端末を使っている店だけ設定します。会計の金額がSquareのアプリに自動で渡り、打ち間違いがなくなります。使わない時は空のままで大丈夫です。</p>
       <div class="lgrid"><label>SquareのアプリID<input class="inp" id="sqApp" value="${esc(S.link.sqApp||'')}" placeholder="sq0idp-..." autocapitalize="none" spellcheck="false"></label></div>
       <h4 class="sh">連動する支払い方法</h4>${manualMethods().filter(m=>!m.cash).map(m=>`<div class="row" style="margin-top:6px"><span style="min-width:90px">${esc(m.name)}</span><select class="inp" id="sqM_${m.id}">${[['','連動しない'],['CREDIT_CARD','カード'],['PAYPAY','PayPay'],['OTHER','その他']].map(([v,n])=>`<option value="${v}" ${(S.link.map||{})[m.id]===v?'selected':''}>${n}</option>`).join('')}</select></div>`).join('')}
@@ -1099,6 +1102,8 @@ const A={
     const hash=v?await sha(SHOP_ID+':'+v):S.guard.hash;audit('set','店長の暗証番号');
     w(Store.set('config','guard',{hash,acts}),'暗証番号の設定を保存しました').then(()=>render(true))},
   clearpin(){confirmBox('暗証番号をなくす','暗証番号をなくすと、値引きや取消が誰でもできるようになります。','なくす',()=>{audit('set','店長の暗証番号をなくした');w(Store.del('config','guard'),'暗証番号をなくしました').then(()=>render(true))})},
+  uberon(){if(ME.demo){toast('デモでは使えません');return}window.open(FN_BASE+'/uberConnect?shop='+encodeURIComponent(SHOP_ID),'_blank')},
+  uberoff(){confirmBox('Uber Eats の連動','連動を外します。Uberの注文は自動で入らなくなります。','外す',async()=>{try{const r=await fetch(FN_BASE+'/uberDisconnect?shop='+encodeURIComponent(SHOP_ID)+'&key='+encodeURIComponent((S.uber||{}).key||''));toast(r.ok?'連動を外しました':'外せませんでした','err')}catch(e){toast('外せませんでした（通信）','err')}})},
   savefee(){const rates={};for(const m of METHODS.filter(m=>!m.cash)){const t=$('#fee_'+m.id).value.normalize('NFKC').replace(/[%\s]/g,'');if(!t)continue;const v=Number(t);if(!(v>0&&v<=20)){toast(m.name+'の率は 0〜20 の数字で入れてください（例 3.24）','err');return}rates[m.id]=v}
     audit('set','決済手数料の率');w(Object.keys(rates).length?Store.set('config','fee',{rates}):Store.del('config','fee'),'手数料の率を保存しました').then(()=>render(true))},
   savelink(){const app=$('#sqApp').value.trim(),map={};METHODS.filter(m=>!m.cash).forEach(m=>{const v=$('#sqM_'+m.id).value;if(v)map[m.id]=v});
@@ -1166,7 +1171,7 @@ Store.init().then(()=>{
   Store.sub('config',a=>{
     const g=id=>a.find(x=>x.id===id);
     const mn=g('menu'),st=g('seats'),sd=g('sold'),tg=g('tags'),tx=g('tax'),gd=g('guard'),lk=g('link'),fe=g('fee');
-    S.fee=fe&&fe.rates?fe.rates:{};const ub=g('uber');S.uberLive=!!(ub&&ub.live);
+    S.fee=fe&&fe.rates?fe.rates:{};const ub=g('uber');S.uber=ub||null;S.uberLive=!!(ub&&ub.live);
     S.tax=tx&&Array.isArray(tx.red)&&tx.red.length?{std:tx.std==null?DEFAULT_TAX.std:tx.std,red:tx.red,mode:tx.mode==='base'?'base':'same',inv:tx.inv||'',useTo:tx.useTo!==false}:DEFAULT_TAX;
     S.guard=gd&&gd.hash?{hash:gd.hash,acts:gd.acts||{}}:null;
     S.link=lk&&lk.sqApp?{sqApp:lk.sqApp,map:lk.map||{}}:{sqApp:'',map:{}};
