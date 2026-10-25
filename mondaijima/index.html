@@ -103,7 +103,7 @@ h1,h2,h3{margin:0;text-wrap:balance}
 /* プレイ */
 .top{display:flex;align-items:center;gap:12px}
 .dots{display:flex;gap:5px;flex:1;min-width:0;flex-wrap:wrap}
-.dots i{width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid var(--line);display:inline-block}
+.dots i{width:18px;height:18px;flex:none;border-radius:50%;background:#fff;border:2px solid var(--line);display:inline-block}
 .dots i.ok{background:var(--ok);border-color:var(--ok)}
 .dots i.ng{background:var(--ng);border-color:var(--ng)}
 .dots i.now{border-color:var(--accent);border-width:4px}
@@ -155,6 +155,39 @@ h1,h2,h3{margin:0;text-wrap:balance}
 .fb-a{font-weight:800;font-size:22px}
 .fb-e{font-size:16px;max-width:36em;margin:0}
 
+
+/* 横向き：左に問題、右にボタン */
+.play{display:flex;flex-direction:column;gap:14px}
+.pl-left,.pl-right{display:flex;flex-direction:column;gap:14px;min-width:0}
+@media (orientation:landscape) and (min-width:600px){
+  body{padding-block:8px 12px}
+  .app:has(.play){max-width:1280px}
+  .play{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(12px,2.5vw,28px);align-items:start}
+  .pl-left,.pl-right{gap:clamp(8px,1.8vh,14px)}
+  .play .pal{width:clamp(52px,13vh,100px);height:clamp(52px,13vh,100px)}
+  .play .bubble{margin-bottom:clamp(8px,3vh,24px);font-size:clamp(14px,2.6vh,17px);padding:6px 12px}
+  .play .card{padding:clamp(12px,2.5vh,24px)}
+  .play .q{gap:clamp(6px,1.5vh,12px)}
+  .play .q-text{font-size:clamp(17px,3.8vh,27px)}
+  .play .q-big{font-size:clamp(48px,17vh,110px)}
+  .play .q-eq{font-size:clamp(28px,8vh,56px)}
+  .play .q-eq.small{font-size:clamp(18px,4.5vh,34px)}
+  .play .q-vis{width:min(100%,clamp(140px,40vh,280px))}
+  .play .q-vis.wide{width:100%}
+  .play .q-vis svg{max-height:38vh;width:auto;max-width:100%;margin-inline:auto}
+  .pl-right{position:sticky;top:8px}
+  .play .choices,.play .choices.c1{grid-template-columns:1fr 1fr;gap:clamp(8px,1.6vh,12px)}
+  .play .choice{min-height:clamp(46px,15vh,110px);font-size:clamp(16px,3.6vh,22px);padding:6px 10px}
+  .play .choice.shape svg{width:clamp(48px,14vh,88px);height:clamp(48px,14vh,88px)}
+  .play .pad{max-width:none;gap:clamp(6px,1.4vh,10px)}
+  .play .disp{min-height:clamp(44px,12vh,96px);font-size:clamp(26px,7.5vh,56px)}
+  .play .key{min-height:clamp(40px,12.5vh,104px);font-size:clamp(20px,5vh,36px)}
+  .play .key.go,.play .key.del{font-size:clamp(15px,3vh,20px)}
+  .play.has-fb .pad{display:none}
+  .play .fb{padding:clamp(8px,2vh,16px) 14px;gap:clamp(4px,1vh,8px)}
+  .play .fb-h{font-size:clamp(22px,5vh,38px)}
+  .play .fb .btn{min-height:clamp(44px,10vh,60px)}
+}
 /* けっか */
 .res{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
 .bigstars{display:flex;gap:6px}
@@ -764,9 +797,10 @@ function startGame(k){
 }
 function playHTML(){
   const g=S.game,q=g.qs[g.i],p=S.player,fb=g.fb;
-  let h='<div class="top"><div class="dots">'+g.qs.map((_,i)=>'<i class="'+(g.log[i]?(g.log[i].ok?"ok":"ng"):"")+(i===g.i?" now":"")+'"></i>').join("")+'</div><div class="coins">'+COIN+'<span>'+g.coins+'</span></div></div>';
+  let h='<div class="play'+(fb?' has-fb':'')+'"><div class="pl-left"><div class="top"><div class="dots">'+g.qs.map((_,i)=>'<i class="'+(g.log[i]?(g.log[i].ok?"ok":"ng"):"")+(i===g.i?" now":"")+'"></i>').join("")+'</div><div class="coins">'+COIN+'<span>'+g.coins+'</span></div></div>';
   h+='<div class="stage">'+pal(p.char,g.mood)+'<div class="bubble">'+esc(g.line)+'</div></div>';
   h+='<section class="card"><div class="q"><span class="q-tag">'+islandName(g.k)+'・'+(g.i+1)+'もんめ・'+TYPES[q.t][0]+'</span><h2 class="q-text">'+esc(q.text)+'</h2>'+(q.big?'<div class="q-big">'+esc(q.big)+'</div>':"")+(q.eq?'<div class="q-eq'+(q.eq.length>9?" small":"")+'">'+esc(q.eq)+'</div>':"")+(q.vis?'<div class="q-vis'+(q.visWide?" wide":"")+'">'+q.vis+'</div>':"")+'</div></section>';
+  h+='</div><div class="pl-right">';
   if(q.kind==="choice"){
     h+='<div class="choices'+(q.cols===1?" c1":"")+'">'+q.perm.map((ci,i)=>{let cls="choice"+(q.svgChoices?" shape":"");if(fb){if(ci===0)cls+=" right";else if(i===fb.pick)cls+=" wrong";else cls+=" dim"}
       return '<button class="'+cls+'" data-act="choose" data-i="'+i+'"'+(fb?" disabled":"")+'>'+(q.svgChoices?q.choices[ci]:esc(q.choices[ci]))+'</button>'}).join("")+'</div>';
@@ -780,6 +814,7 @@ function playHTML(){
     h+='<div class="fb '+(fb.ok?"ok":"ng")+'" role="status"><div class="fb-h">'+(fb.ok?"せいかい！":"ざんねん…")+'</div>'+(fb.ok?"":(ansText?'<div class="fb-a">こたえ：'+esc(ansText)+'</div>':'<div class="fb-a">みどりの わくが こたえ</div>'))+'<p class="fb-e">'+esc(q.expl)+'</p>'+
       '<button class="btn'+(fb.ok?" sub":"")+'" data-act="next">'+(g.i+1>=g.qs.length?"けっかを みる":"つぎへ")+'</button></div>';
   }
+  h+='</div></div>';
   return h;
 }
 function answer(ok,pk){
