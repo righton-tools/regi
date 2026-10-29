@@ -895,8 +895,8 @@ function renderSettings(main,force){
       <div class="lgrid"><label>新しい暗証番号（数字4〜8けた）<input class="inp" id="pinNew" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label></div>
       <h4 class="sh">暗証番号を聞く操作</h4>${GUARDS.map(([k,n])=>`<label class="tck"><input type="checkbox" id="pg_${k}" ${S.guard&&S.guard.acts?(S.guard.acts[k]?'checked':''):(['void','disc','cancel','cashio','drawer'].includes(k)?'checked':'')}>${n}</label>`).join('')}
       <p class="lerr" id="pinMsg"></p><div class="row"><button class="btn dark" data-a="savepin">保存</button>${S.guard&&S.guard.hash?'<button class="btn" data-a="clearpin">暗証番号をなくす</button>':''}</div></div>
-    <div class="card"><h3>Uber Eats との連動 ${HP('uberlink')}</h3><p>つなぐと、Uber Eatsの注文が自動でオーダー画面に出て、売上に「Uber Eats」として記録されます。店のUber Eatsマネージャーのアカウントでログインして「許可」を押すだけです。</p>
-      ${S.uberLive?`<p class="hint" style="color:var(--ok)">連動中：${esc((S.uber||{}).name||'')}</p><div class="row"><button class="btn" data-a="uberoff">連動を外す</button></div>`
+    <div class="card"><h3>Uber Eats との連動 ${HP('uberlink')}</h3><p>つなぐと、Uber Eatsのタブレットで受けた注文が、自動で売上に「Uber Eats」として記録されます。店のUber Eatsマネージャーのアカウントでログインして「許可」を押すだけです。</p>
+      ${S.uberLive?`<p class="hint" style="color:var(--ok)">連動中：${esc((S.uber||{}).name||'')}</p>`
         :`<div class="row"><button class="btn pri" data-a="uberon">Uber Eats とつなぐ</button></div>${ME.demo?'<p class="hint">（デモでは動きません）</p>':''}`}</div>
     <div class="card"><h3>カード端末との連動（Square） ${HP('sqlink')}</h3><p>Squareのカード端末を使っている店だけ設定します。会計の金額がSquareのアプリに自動で渡り、打ち間違いがなくなります。使わない時は空のままで大丈夫です。</p>
       <div class="lgrid"><label>SquareのアプリID<input class="inp" id="sqApp" value="${esc(S.link.sqApp||'')}" placeholder="sq0idp-..." autocapitalize="none" spellcheck="false"></label></div>
@@ -1103,7 +1103,6 @@ const A={
     w(Store.set('config','guard',{hash,acts}),'暗証番号の設定を保存しました').then(()=>render(true))},
   clearpin(){confirmBox('暗証番号をなくす','暗証番号をなくすと、値引きや取消が誰でもできるようになります。','なくす',()=>{audit('set','店長の暗証番号をなくした');w(Store.del('config','guard'),'暗証番号をなくしました').then(()=>render(true))})},
   uberon(){if(ME.demo){toast('デモでは使えません');return}window.open(FN_BASE+'/uberConnect?shop='+encodeURIComponent(SHOP_ID),'_blank')},
-  uberoff(){confirmBox('Uber Eats の連動','連動を外します。Uberの注文は自動で入らなくなります。','外す',async()=>{try{const r=await fetch(FN_BASE+'/uberDisconnect?shop='+encodeURIComponent(SHOP_ID)+'&key='+encodeURIComponent((S.uber||{}).key||''));toast(r.ok?'連動を外しました':'外せませんでした','err')}catch(e){toast('外せませんでした（通信）','err')}})},
   savefee(){const rates={};for(const m of METHODS.filter(m=>!m.cash)){const t=$('#fee_'+m.id).value.normalize('NFKC').replace(/[%\s]/g,'');if(!t)continue;const v=Number(t);if(!(v>0&&v<=20)){toast(m.name+'の率は 0〜20 の数字で入れてください（例 3.24）','err');return}rates[m.id]=v}
     audit('set','決済手数料の率');w(Object.keys(rates).length?Store.set('config','fee',{rates}):Store.del('config','fee'),'手数料の率を保存しました').then(()=>render(true))},
   savelink(){const app=$('#sqApp').value.trim(),map={};METHODS.filter(m=>!m.cash).forEach(m=>{const v=$('#sqM_'+m.id).value;if(v)map[m.id]=v});
