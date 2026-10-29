@@ -77,6 +77,7 @@ function card(id){
       <label>いまのパスワード（同じIDのまま変える時だけ）<input class="inp" data-i="cur" type="password" autocomplete="off"></label></div>
       <p class="lerr" data-f="lmsg"></p><button class="btn dark" data-b="login">このログインを作る・作り直す</button>
       <p style="margin:10px 0 0;font-size:12px;color:var(--muted)">作り直すと、同じ種類の古いログインは使えなくなります。お店の人が開くページ：<span class="num">${esc(base)}</span></p></details>
+    <details><summary>Uber Eats の受付履歴（オーナーだけ） ${HP('uberlog')}</summary><div data-f="uber"></div></details>
     <details><summary>日別の売上（日締め済み・直近31日） ${HP('days')}</summary><div data-f="days"></div></details>
     <details><summary>バックアップ（データの控え） ${HP('backup')}</summary><p data-f="bk" style="margin:6px 0 10px;font-size:13px"></p>
       <p class="lerr" data-f="bmsg"></p><button class="btn dark" data-b="backup">このお店のデータを保存する</button></details>`;
@@ -101,6 +102,7 @@ function render(){
       <dl><div><dt>会計数</dt><dd class="num">${s.count}件</dd></div><div><dt>未会計の注文</dt><dd class="num">${s.open}件</dd></div><div><dt>未確認の注文</dt><dd class="num">${s.fresh}件</dd></div></dl>`;
     const days=Object.entries((data[id]||{}).days||{}).sort((a,b)=>a[0]<b[0]?1:-1).slice(0,31);
     el.querySelector('[data-f="days"]').innerHTML=days.length?`<div class="tblwrap"><table><tr><th>日付</th><th class="r">売上</th><th class="r">会計数</th></tr>${days.map(([d,v])=>`<tr><td class="num">${esc(d)}</td><td class="r num">${yen(v.total)}</td><td class="r num">${v.count||0}</td></tr>`).join('')}</table></div>`:'<p class="empty" style="padding:12px">まだ日締めがありません</p>';
+    el.querySelector('[data-f="uber"]').innerHTML=uberView(id);
     const bk=shops[id].bk,bd=bk?Math.floor((Date.now()-bk)/86400000):null;
     el.querySelector('[data-f="bk"]').innerHTML=bk?'最後に保存した日：'+esc(new Date(bk).toLocaleDateString('ja-JP'))+(bd>=7?'　<b style="color:var(--shu)">'+bd+'日たっています。保存してください</b>':''):'<b style="color:var(--shu)">まだ一度も保存していません</b>';
     const lg=logins[id];
@@ -108,11 +110,37 @@ function render(){
   });
   document.getElementById('mtotal').textContent='全店 本日 '+yen(all);
 }
+/* Uber Eats の受付履歴（ownerlog はマスターだけが読める） */
+const UST=(st,rs)=>st==='ONLINE'?['受付中','ok']:rs==='OUT_OF_MENU_HOURS'?['営業時間外','off']:[st==='PAUSED'||/PAUSE/.test(rs)?'一時停止中':'受付停止中','ng'];
+const hmJ=t=>{const d=new Date(t),p=n=>String(n).padStart(2,'0');return (d.getMonth()+1)+'/'+d.getDate()+' '+p(d.getHours())+':'+p(d.getMinutes())};
+const durJ=ms=>{const m=Math.round(ms/60000);return m<60?m+'分':Math.floor(m/60)+'時間'+(m%60?m%60+'分':'')};
+function uberView(id){
+  const d=data[id]||{},cur=d.ucur,lg=Object.values(d.ulog||{}).sort((a,b)=>a.at-b.at);
+  if(!cur&&!lg.length)return '<p style="margin:6px 0;font-size:13px;color:var(--muted)">Uber Eats とまだつながっていません（つながると、受付中・停止の切り替えがここに自動で残ります）。</p>';
+  const st=lg.filter(x=>x.kind==='status');
+  // 停止していた時間（営業時間外は除く）を、今日・直近7日で集計
+  const now=Date.now(),t0=new Date();t0.setHours(0,0,0,0);const d7=t0.getTime()-6*86400000;
+  let today=0,week=0,cntT=0;
+  st.forEach((x,i)=>{const [,k]=UST(x.status,x.reason);if(k!=='ng')return;const a=x.at,b=(st[i+1]||{}).at||now;
+    const ov=(s,e)=>Math.max(0,Math.min(b,e)-Math.max(a,s));today+=ov(t0.getTime(),now);week+=ov(d7,now);if(a>=t0.getTime())cntT++});
+  const [cn,ck]=cur?UST(cur.status,cur.reason):['不明','off'];
+  const col={ok:'var(--ok)',ng:'var(--shu)',off:'var(--muted)'};
+  const rows=lg.slice().reverse().slice(0,60).map((x,i,arr)=>{
+    if(x.kind==='link')return `<tr><td class="num">${hmJ(x.at)}</td><td colspan="2">${x.on?'レジとUberを<b>つないだ</b>':'レジとUberの連動を<b>外した</b>（'+esc(x.by||'')+'）'}</td></tr>`;
+    const [n,k]=UST(x.status,x.reason),nx=st[st.indexOf(x)+1],dur=(nx?nx.at:now)-x.at;
+    return `<tr><td class="num">${hmJ(x.at)}</td><td style="color:${col[k]};font-weight:700">${n}</td><td class="r num">${durJ(dur)}${nx?'':'（継続中）'}</td></tr>`}).join('');
+  return `<div style="margin:6px 0 10px"><span style="font-weight:700;color:${col[ck]}">いま：${cn}</span>${cur?'　<small style="color:var(--muted)">'+hmJ(cur.at)+'から</small>':''}</div>
+    <dl><div><dt>今日の停止時間</dt><dd class="num">${durJ(today)}</dd></div><div><dt>今日の停止回数</dt><dd class="num">${cntT}回</dd></div><div><dt>直近7日の停止時間</dt><dd class="num">${durJ(week)}</dd></div></dl>
+    <div class="tblwrap"><table><tr><th>切り替わった時刻</th><th>状態</th><th class="r">続いた時間</th></tr>${rows}</table></div>
+    <p style="margin:6px 0 0;font-size:12px;color:var(--muted)">「営業時間外」はUberに登録した営業時間の外で、停止時間には数えていません。この記録はお店の画面には出ません。</p>`;
+}
 async function loadLogins(id){try{logins[id]=await PA.listLogins(DB,id)}catch(e){logins[id]=[]}render()}
 function sub(id){
   if(subbed[id])return;subbed[id]=true;data[id]={};
   ['sales','orders','days'].forEach(c=>DB.ref('shops/'+id+'/'+c).on('value',s=>{data[id][c]=s.val()||{};render()}));
   DB.ref('members/'+id).on('value',()=>loadLogins(id),()=>{});
+  DB.ref('ownerlog/'+id+'/cur').on('value',s=>{data[id].ucur=s.val();render()},()=>{});
+  DB.ref('ownerlog/'+id+'/log').limitToLast(300).on('value',s=>{data[id].ulog=s.val()||{};render()},()=>{});
 }
 async function addShop(e){
   const f=e.target.files[0],msg=document.getElementById('mmsg');if(!f)return;msg.textContent='読み込み中…';
